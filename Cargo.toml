@@ -1,0 +1,90 @@
+[package]
+name = "Noita_demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.14.2"
+bevy_rapier2d = "0.27.0"
+rand = "0.8"
+noise = "0.8"
+
+[[example]]
+name = "falling_sand_basic"
+path = "examples/falling_sand_basic.rs"
+
+[[example]]
+name = "platforming_jump"
+path = "examples/platforming_jump.rs"
+
+[[example]]
+name = "physics_bridge"
+path = "examples/physics_bridge.rs"
+
+[[example]]
+name = "optimizing_physics_bridge"
+path = "examples/optimizing_physics_bridge.rs"
+
+[[example]]
+name = "making_atoms_kinetic"
+path = "examples/making_atoms_kinetic.rs"
+
+[[example]]
+name = "particles_real"
+path = "examples/particles_real.rs"
+
+[[example]]
+name = "playing_nice_with_bodies"
+path = "examples/playing_nice_with_bodies.rs"
+
+[[example]]
+name = "designing_magic_system"
+path = "examples/designing_magic_system.rs"
+
+[[example]]
+name = "atomic_holes_multiplayer"
+path = "examples/atomic_holes_multiplayer.rs"
+
+[[example]]
+name = "discord_making_splash"
+path = "examples/discord_making_splash.rs"
+
+[[example]]
+name = "acid_fire"
+path = "examples/acid_fire.rs"
+
+[[example]]
+name = "boil_toil"
+path = "examples/boil_toil.rs"
+
+[[example]]
+name = "multiplayer_fever"
+path = "examples/multiplayer_fever.rs"
+
+[[example]]
+name = "let_sleeping_atoms_lie"
+path = "examples/let_sleeping_atoms_lie.rs"
+
+[[example]]
+name = "loading_levels"
+path = "examples/loading_levels.rs"
+
+[[example]]
+name = "pew_pew_pew"
+path = "examples/pew_pew_pew.rs"
+
+[[example]]
+name = "ragdolls"
+path = "examples/ragdolls.rs"
+
+[[example]]
+name = "big_bada_boom"
+path = "examples/big_bada_boom.rs"
+
+[[example]]
+name = "ladders_and_shrooms"
+path = "examples/ladders_and_shrooms.rs"
+
+[[example]]
+name = "flinging_powder_atoms"
+path = "examples/flinging_powder_atoms.rs"

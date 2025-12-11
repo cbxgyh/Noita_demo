@@ -88,6 +88,14 @@ impl SimulationMode {
         }
     }
 
+    fn random_bool(&mut self, probability: f32) -> bool {
+        if self.deterministic {
+            self.rng.next_bool(probability)
+        } else {
+            rand::random::<f32>() < probability
+        }
+    }
+
     fn advance_tick(&mut self) {
         self.tick_number += 1;
     }
@@ -143,7 +151,7 @@ impl PhysicsParticle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Resource)]
 struct NondeterminismDemo {
     deterministic_sim: SimulationMode,
     nondeterministic_sim: SimulationMode,
@@ -358,7 +366,7 @@ fn handle_nondeterminism_input(
     let mouse_pos = if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     world_pos.origin.truncate()
                 } else {
                     Vec2::ZERO

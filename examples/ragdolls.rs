@@ -187,22 +187,27 @@ fn create_ragdoll(
         let bone_a = limb_entities[bone_a_idx];
         let bone_b = limb_entities[bone_b_idx];
 
-        let joint = match joint_type {
+        // Convert each joint builder into the common GenericJoint type so the match
+        // arms are compatible.
+        let joint: GenericJoint = match joint_type {
             JointType::Revolute => {
                 RevoluteJointBuilder::new()
                     .local_anchor1(anchor_a)
                     .local_anchor2(anchor_b)
+                    .into()
             }
             JointType::Fixed => {
                 FixedJointBuilder::new()
                     .local_anchor1(anchor_a)
                     .local_anchor2(anchor_b)
+                    .into()
             }
             JointType::Prismatic => {
                 PrismaticJointBuilder::new(Vec2::Y)
                     .local_anchor1(anchor_a)
                     .local_anchor2(anchor_b)
                     .limits([-10.0, 10.0])
+                    .into()
             }
         };
 

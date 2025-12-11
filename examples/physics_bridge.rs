@@ -84,10 +84,7 @@ fn main() {
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(32.0))
         .add_plugins(RapierDebugRenderPlugin::default())
-        .insert_resource(RapierConfiguration {
-            gravity: Vec2::new(0.0, -100.0),
-            ..default()
-        })
+
         .insert_resource(WorldResource(AtomWorld::new(100, 75)))
         .add_systems(Startup, setup)
         .add_systems(Update, (
@@ -329,7 +326,16 @@ fn displace_atoms_around_point(world: &mut AtomWorld, pos: Vec2, force: Vec2) {
                 let x = (pos.x + dx as f32) as i32;
                 let y = (pos.y + dy as f32) as i32;
 
-                if let Some(atom) = world.get(x, y) {
+                // Clone atom first to avoid borrowing conflict
+                // 代码在持有 world.get(x, y) 返回的不可变引用时，试图调用 world.set() 进行可变借用
+                // Rust 不允许同时持有不可变和可变借用
+                // 解决方案：
+                // 使用 .cloned() 先克隆 atom，避免持有不可变借用
+                // 在克隆的 atom 上检查条件
+                // 满足条件时，先释放借用，再调用 world.set() 进行修改
+                //      if let Some(atom) = world.get(x, y) {
+                let atom = world.get(x, y).cloned();
+                if let Some(atom) = atom {
                     if atom.atom_type.is_solid() && rand::random::<f32>() < 0.3 {
                         // Move atom in direction of force
                         let new_x = x + (force.x * 0.5) as i32;
@@ -337,7 +343,7 @@ fn displace_atoms_around_point(world: &mut AtomWorld, pos: Vec2, force: Vec2) {
 
                         if world.is_empty(new_x, new_y) {
                             world.set(x, y, Atom { atom_type: AtomType::Empty });
-                            world.set(new_x, new_y, atom.clone());
+                            world.set(new_x, new_y, atom);
                         }
                     }
                 }
@@ -359,7 +365,7 @@ fn render_atoms(
     // Render current atoms
     for y in 0..world.0.height {
         for x in 0..world.0.width {
-            if let Some(atom) = world.get(x as i32, y as i32) {
+            if let Some(atom) = world.0.get(x as i32, y as i32) {
                 if atom.atom_type != AtomType::Empty {
                     let entity = commands.spawn(SpriteBundle {
                         sprite: Sprite {

@@ -8,7 +8,7 @@ use bevy_rapier2d::prelude::*;
 // Moving bodies that properly interact with atoms (water, sand, etc.)
 // Demonstrates displacement, buoyancy, and realistic physics interactions
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,PartialEq)]
 enum AtomType {
     Empty,
     Sand,
@@ -143,7 +143,8 @@ impl InteractiveBody {
                             Vec2::new(1.0, 1.0)
                         );
 
-                        if body_rect.intersect(atom_rect).is_some() {
+                        let intersection = body_rect.intersect(atom_rect);
+                        if intersection.width() > 0.0 && intersection.height() > 0.0 {
                             atoms_in_body.push((x, y, atom.clone()));
                         }
                     }
@@ -181,12 +182,16 @@ impl InteractiveBody {
                 }
                 AtomType::Stone => {
                     // Stone is solid - body bounces off
-                    if let Some(intersection) = body_rect.intersect(
+                    let intersection = body_rect.intersect(
                         Rect::from_center_size(atom.position, Vec2::new(1.0, 1.0))
-                    ) {
+                    );
+                    if intersection.width() > 0.0 && intersection.height() > 0.0 {
                         // Simple collision response
                         let normal = (self.position - atom.position).normalize_or(Vec2::Y);
-                        self.velocity = self.velocity.reflect(normal) * 0.8;
+                        // Reflect velocity: v' = v - 2 * (v · n) * n
+                        let dot = self.velocity.dot(normal);
+                        self.velocity = self.velocity - normal * (2.0 * dot);
+                        self.velocity *= 0.8;
                         self.position += normal * 0.1; // Push away from stone
                     }
                 }
@@ -303,9 +308,18 @@ impl InteractiveWorld {
     }
 
     fn update(&mut self, dt: f32) {
-        // Update bodies
-        for body in &mut self.bodies {
-            body.update(dt, self);
+        // Update bodies - use indices to avoid borrowing conflict
+        // We need to update each body, but body.update needs &mut self
+        // Solution: use unsafe to create separate mutable references
+        let body_count = self.bodies.len();
+        for i in 0..body_count {
+            unsafe {
+                let body_ptr = self.bodies.as_mut_ptr().add(i);
+                let body = &mut *body_ptr;
+                let world_ptr = self as *mut Self;
+                let world = &mut *world_ptr;
+                body.update(dt, world);
+            }
         }
 
         // Update atoms
@@ -477,7 +491,8 @@ fn render_interactive_atoms(
     for atom in &world.0.atoms {
         if atom.atom_type != AtomType::Empty {
             let alpha = if atom.submerged { 0.7 } else { 1.0 };
-            let color = atom.atom_type.color().with_a(alpha);
+            let [r, g, b, _] = atom.atom_type.color().to_srgba().to_f32_array();
+            let color = Color::srgba(r, g, b, alpha);
 
             let entity = commands.spawn(SpriteBundle {
                 sprite: Sprite {
@@ -548,7 +563,8 @@ fn render_displacement_particles(
     // Render displacement particles
     for particle in &world.0.displacement_particles {
         let alpha = (particle.lifetime / 0.5).max(0.0);
-        let color = particle.atom_type.color().with_a(alpha * 0.6);
+        let [r, g, b, _] = particle.atom_type.color().to_srgba().to_f32_array();
+        let color = Color::srgba(r, g, b, alpha * 0.6);
 
         let entity = commands.spawn(SpriteBundle {
             sprite: Sprite {
@@ -576,7 +592,7 @@ fn handle_interactive_input(
     if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     let atom_x = (world_pos.origin.x + world.0.width as f32 / 2.0) as usize;
                     let atom_y = (world_pos.origin.y + world.0.height as f32 / 2.0) as usize;
 

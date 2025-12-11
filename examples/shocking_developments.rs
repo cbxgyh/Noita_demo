@@ -66,7 +66,7 @@ impl Atom {
         Self {
             position,
             velocity: Vec2::ZERO,
-            element,
+            element:element.clone(),
             temperature: 20.0,
             charge: if element == Element::Electricity { 1.0 } else { 0.0 },
             lifetime: match element {
@@ -78,7 +78,7 @@ impl Atom {
         }
     }
 
-    fn update(&mut self, dt: f32, grid: &AtomGrid) {
+    fn update(&mut self, dt: f32, grid: &mut AtomGrid) {
         // Apply gravity
         if self.element != Element::Electricity {
             self.velocity.y -= 300.0 * dt * self.element.density();
@@ -97,25 +97,45 @@ impl Atom {
             // Find nearby conductive atoms and spread charge
             let nearby_atoms = grid.get_nearby_atoms(self.position, 1.5);
             for (other_id, other_pos) in nearby_atoms {
-                if *other_id != self.id {
-                    let distance = self.position.distance(*other_pos);
+                if other_id != self.id {
+                    let distance = self.position.distance(other_pos);
                     if distance < 1.5 {
-                        // Spread charge to nearby conductive atoms
-                        if let Some(other_atom) = grid.get_atom_mut(*other_id) {
+                        // Spread charge to nearby conductive atoms grid.get_atom_mut(other_id)
+                        // We can't call other &mut grid methods while `other_atom` is borrowed,
+                        // so schedule the spark creation and run it after the borrow ends.
+                        // if let Some(other_atom) = grid.get_atom_mut(other_id){
+                        //     if other_atom.element.is_conductive() {
+                        //         let charge_transfer = self.charge * 0.1 * dt;
+                        //         self.charge -= charge_transfer;
+                        //         other_atom.charge += charge_transfer;
+                        //
+                        //         // Create spark visual effect
+                        //         if rand::random::<f32>() < 0.1 {
+                        //             grid.add_atom(Atom::new(
+                        //                 self.position.lerp(other_pos, 0.5),
+                        //                 Element::Electricity,
+                        //                 grid.next_id(),
+                        //             ));
+                        //         }
+                        //     }
+                        // }
+                        let mut spark_to_add: Option<Vec2> = None;
+
+                        if let Some(other_atom) = grid.get_atom_mut(other_id){
                             if other_atom.element.is_conductive() {
                                 let charge_transfer = self.charge * 0.1 * dt;
                                 self.charge -= charge_transfer;
                                 other_atom.charge += charge_transfer;
 
-                                // Create spark visual effect
                                 if rand::random::<f32>() < 0.1 {
-                                    grid.add_atom(Atom::new(
-                                        self.position.lerp(*other_pos, 0.5),
-                                        Element::Electricity,
-                                        grid.next_id(),
-                                    ));
+                                    spark_to_add = Some(self.position.lerp(other_pos, 0.5));
                                 }
                             }
+                        }
+
+                        if let Some(pos) = spark_to_add {
+                            let new_id = grid.next_id();
+                            grid.add_atom(Atom::new(pos, Element::Electricity, new_id));
                         }
                     }
                 }
@@ -133,7 +153,8 @@ impl Atom {
         // Combustion
         if self.temperature > 100.0 && self.element.is_flammable() {
             if rand::random::<f32>() < 0.01 {
-                grid.add_atom(Atom::new(self.position, Element::Fire, grid.next_id()));
+                let grid_next=grid.next_id();
+                grid.add_atom(Atom::new(self.position, Element::Fire, grid_next));
             }
         }
 
@@ -141,7 +162,7 @@ impl Atom {
         if self.element == Element::Fire {
             let nearby_atoms = grid.get_nearby_atoms(self.position, 1.0);
             for (other_id, _) in nearby_atoms {
-                if let Some(other_atom) = grid.get_atom_mut(*other_id) {
+                if let Some(other_atom) = grid.get_atom_mut(other_id) {
                     if other_atom.element.is_flammable() && rand::random::<f32>() < 0.05 {
                         other_atom.temperature += 20.0;
                     }
@@ -196,15 +217,36 @@ impl AtomGrid {
     }
 
     fn update(&mut self, dt: f32) {
-        // Update all atoms
-        for i in 0..self.atoms.len() {
-            if let Some(atom) = self.atoms.get_mut(i) {
-                atom.update(dt, self);
-            }
-        }
+        // Update atoms one by one while temporarily owning each atom to avoid
+        // overlapping &mut borrows when calling `atom.update(dt, self)`.
 
-        // Remove dead atoms
-        self.atoms.retain(|atom| atom.is_alive());
+            // Update all atoms
+            // for i in 0..self.atoms.len() {
+            //     let mut atom = self.atoms.remove(i);
+            //     if let Some(atom) = self.atoms.get_mut(i) {
+            //         atom.update(dt, self);
+            //     }
+            //
+            // }
+            // Remove dead atoms
+            //     self.atoms.retain(|atom| atom.is_alive());     ##
+        //     这样改是为了解决可变借用冲突（E0499）：在循环里用 get_mut 取出 atom 的同时，又把整个 self 以 &mut 传给 atom.update(dt, self)，
+        // 两者重叠借用同一对象，被借用检查器拒绝。
+        // 新的写法每次用 remove(i) 把元素移出，临时拥有该 atom，此时 self.atoms 里不再包含它，
+        // self 可安全以 &mut 传给 atom.update。更新后如果还存活再 insert 回原位置并前进；死亡的直接丢弃，
+        // add_atom 产生的新原子会追加到末尾。这样既避免重叠借用，又保持循环推进和新增/删除的语义。
+        let mut i = 0;
+        while i < self.atoms.len() {
+            let mut atom = self.atoms.remove(i);
+            atom.update(dt, self);
+
+            if atom.is_alive() {
+                // Reinsert the updated atom and advance.
+                self.atoms.insert(i, atom);
+                i += 1;
+            }
+            // Dead atoms are dropped; newly spawned atoms (via add_atom) are appended.
+        }
     }
 
     fn create_electrical_source(&mut self, position: Vec2, power: f32) {
@@ -213,7 +255,8 @@ impl AtomGrid {
                 (rand::random::<f32>() - 0.5) * 10.0,
                 (rand::random::<f32>() - 0.5) * 10.0,
             );
-            self.add_atom(Atom::new(position + offset, Element::Electricity, self.next_id()));
+            let next= self.next_id();
+            self.add_atom(Atom::new(position + offset, Element::Electricity, next));
         }
     }
 
@@ -224,7 +267,8 @@ impl AtomGrid {
         for i in 0..=steps {
             let t = i as f32 / steps as f32;
             let position = start.lerp(end, t);
-            self.add_atom(Atom::new(position, Element::Metal, self.next_id()));
+            let next = self.next_id();
+            self.add_atom(Atom::new(position, Element::Metal, next));
         }
     }
 }
@@ -289,11 +333,11 @@ impl ShockSystem {
             let mut best_distance = max_distance;
 
             for (_, pos) in nearby_atoms {
-                if !visited_positions.contains(pos) {
-                    let distance = current_pos.distance(*pos);
+                if !visited_positions.contains(&pos) {
+                    let distance = current_pos.distance(pos);
                     if distance < best_distance && distance > 1.0 {
                         best_distance = distance;
-                        best_target = Some(*pos);
+                        best_target = Some(pos);
                     }
                 }
             }
@@ -357,31 +401,33 @@ fn handle_shock_input(
     if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     demo.mouse_position = world_pos.origin.truncate();
                 }
             }
         }
     }
-
+    let mouse_position =demo.mouse_position;
     // Add atoms based on input
     if mouse_input.pressed(MouseButton::Left) {
+
+        let next =demo.grid.next_id();
         if keyboard_input.pressed(KeyCode::ShiftLeft) {
-            demo.grid.add_atom(Atom::new(demo.mouse_position, Element::Electricity, demo.grid.next_id()));
+            demo.grid.add_atom(Atom::new(mouse_position, Element::Electricity, next));
         } else if keyboard_input.pressed(KeyCode::KeyM) {
-            demo.grid.add_atom(Atom::new(demo.mouse_position, Element::Metal, demo.grid.next_id()));
+            demo.grid.add_atom(Atom::new(mouse_position, Element::Metal, next));
         } else if keyboard_input.pressed(KeyCode::KeyW) {
-            demo.grid.add_atom(Atom::new(demo.mouse_position, Element::Water, demo.grid.next_id()));
+            demo.grid.add_atom(Atom::new(mouse_position, Element::Water, next));
         } else if keyboard_input.pressed(KeyCode::KeyF) {
-            demo.grid.add_atom(Atom::new(demo.mouse_position, Element::Fire, demo.grid.next_id()));
+            demo.grid.add_atom(Atom::new(mouse_position, Element::Fire,next));
         } else {
-            demo.grid.add_atom(Atom::new(demo.mouse_position, Element::Sand, demo.grid.next_id()));
+            demo.grid.add_atom(Atom::new(mouse_position, Element::Sand, next));
         }
     }
 
     // Create electrical source
     if keyboard_input.just_pressed(KeyCode::KeyE) {
-        demo.grid.create_electrical_source(demo.mouse_position, 1.0);
+        demo.grid.create_electrical_source(mouse_position, 1.0);
     }
 
     // Create metal structures
@@ -393,7 +439,8 @@ fn handle_shock_input(
 
     // Trigger shock chain
     if keyboard_input.just_pressed(KeyCode::Space) {
-        demo.shock_system.create_chain_shock(&demo.grid, demo.mouse_position, 50.0);
+        let x=demo.grid.clone();
+        demo.shock_system.create_chain_shock(&x, mouse_position, 50.0);
     }
 
     // Clear everything
@@ -434,12 +481,9 @@ fn render_shock_demo(
         } else {
             0.0
         };
+        let [r,g,b,a]=  color.to_srgba().to_f32_array();
+        let final_color = Color::srgba(r*charge_intensity, g*charge_intensity, b*charge_intensity, a);
 
-        let final_color = Color::rgb(
-            color.r + charge_intensity,
-            color.g + charge_intensity,
-            color.b + charge_intensity,
-        );
 
         // Size based on charge
         let size = 4.0 + atom.charge * 2.0;

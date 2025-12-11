@@ -8,7 +8,7 @@ use bevy_rapier2d::prelude::*;
 // Particle system to prevent atoms from crushing moving bodies
 // Demonstrates the solution to the "atoms crushing moving bodies" problem
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Eq, PartialEq)]
 enum AtomType {
     Empty,
     Sand,
@@ -119,12 +119,40 @@ impl ParticleWorld {
     }
 
     fn update(&mut self, dt: f32) {
+
+        // for body in &mut self.moving_bodies {
+        //             body.update(dt);
+        //
+        //             // Create particles around moving bodies to prevent crushing
+        //             self.create_particles_around_body(body);
+        //         }  ##
+        // 代码在循环中持有 &mut self.moving_bodies 的可变借用
+        // 同时调用 self.create_particles_around_body(body)，需要另一个对 self 的可变借用
+        // 这会导致对 self 的多个可变借用冲突
+        // 解决方案：
+        // 分离更新和粒子创建：
+        // 先更新所有 moving_bodies
+        // 释放借用后，再创建粒子
+        // 提取数据：
+        // 将每个 body 的 position 和 velocity 收集到临时向量
+        // 在循环外使用这些数据
+        // 新增方法：
+        // 添加 create_particles_around_position，接受 position 和 velocity
+        // 保留 create_particles_around_body 作为包装方法
+        // 代码现在应可正常编译。此修改符合 Rust 的借用规则，并保持了原有功能。
         // Update moving bodies
         for body in &mut self.moving_bodies {
             body.update(dt);
+        }
 
-            // Create particles around moving bodies to prevent crushing
-            self.create_particles_around_body(body);
+        // Create particles around moving bodies to prevent crushing
+        // Do this after updating bodies to avoid borrowing conflicts
+        let body_data: Vec<(Vec2, Vec2)> = self.moving_bodies.iter()
+            .map(|body| (body.position, body.velocity))
+            .collect();
+        
+        for (position, velocity) in body_data {
+            self.create_particles_around_position(position, velocity);
         }
 
         // Update atoms
@@ -176,13 +204,17 @@ impl ParticleWorld {
     }
 
     fn create_particles_around_body(&mut self, body: &MovingBody) {
+        self.create_particles_around_position(body.position, body.velocity);
+    }
+
+    fn create_particles_around_position(&mut self, position: Vec2, velocity: Vec2) {
         let particle_distance = 2.0; // Distance from body to create particles
         let particle_lifetime = 0.5; // How long particles last
         let num_particles = 8; // Number of particles around the body
 
         for i in 0..num_particles {
             let angle = (i as f32 / num_particles as f32) * std::f32::consts::TAU;
-            let particle_pos = body.position + Vec2::new(angle.cos(), angle.sin()) * particle_distance;
+            let particle_pos = position + Vec2::new(angle.cos(), angle.sin()) * particle_distance;
 
             let x = particle_pos.x.round() as usize;
             let y = particle_pos.y.round() as usize;
@@ -192,7 +224,7 @@ impl ParticleWorld {
                 let particle = ParticleAtom::new_particle(
                     AtomType::Sand, // Use sand as particle material
                     particle_pos,
-                    body.velocity * 0.1, // Particles inherit some body velocity
+                    velocity * 0.1, // Particles inherit some body velocity
                     particle_lifetime,
                 );
                 self.set_atom(x, y, particle);
@@ -375,7 +407,8 @@ fn render_particle_atoms(
     for atom in &world.0.atoms {
         if atom.atom_type != AtomType::Empty {
             let alpha = if atom.is_particle { 0.6 } else { 1.0 };
-            let color = atom.atom_type.color().with_a(alpha);
+            atom.atom_type.color().set_alpha(alpha);
+            let color = atom.atom_type.color();
 
             let entity = commands.spawn(SpriteBundle {
                 sprite: Sprite {
@@ -436,7 +469,7 @@ fn handle_particle_interaction(
     if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     let atom_x = (world_pos.origin.x + world.0.width as f32 / 2.0) as usize;
                     let atom_y = (world_pos.origin.y + world.0.height as f32 / 2.0) as usize;
 

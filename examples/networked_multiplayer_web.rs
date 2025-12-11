@@ -620,18 +620,6 @@ fn render_web_multiplayer_demo(
             transform: Transform::from_xyz(demo.local_player.position.x, demo.local_player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                &demo.local_player.name,
-                TextStyle {
-                    font_size: 10.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 18.0, 2.0),
-            ..default()
-        },
     )).id();
     player_entities.push(local_entity);
 

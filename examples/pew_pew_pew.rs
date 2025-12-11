@@ -324,8 +324,9 @@ impl ShootingGame {
     }
 
     fn player_shoot(&mut self, direction: Vec2, current_time: f64) {
+        let position =self.player.position;
         let weapon = self.player.current_weapon_mut();
-        let new_projectiles = weapon.fire(self.player.position, direction, current_time);
+        let new_projectiles = weapon.fire(position, direction, current_time);
         self.projectiles.extend(new_projectiles);
     }
 }

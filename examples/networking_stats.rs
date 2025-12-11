@@ -372,7 +372,7 @@ impl NetworkingStatsDemo {
                 PacketType::Ping,
             ];
 
-            let packet_type = packet_types[rand::random::<usize>() % packet_types.len()];
+            let packet_type = packet_types[rand::random::<usize>() % packet_types.len()].clone();
 
             // Base packet sizes (uncompressed)
             let base_size = match packet_type {
@@ -386,7 +386,7 @@ impl NetworkingStatsDemo {
             self.monitor.send_packet(packet_type, base_size, self.current_time);
         }
 
-        self.monitor.update(self.current_time, dt);
+        self.monitor.update(self.current_time, dt as f64);
     }
 
     fn adjust_network_conditions(&mut self, latency_change: f64, packet_loss_change: f32) {

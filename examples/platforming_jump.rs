@@ -30,10 +30,7 @@ fn main() {
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(32.0))
         .add_plugins(RapierDebugRenderPlugin::default())
-        .insert_resource(RapierConfiguration {
-            gravity: Vec2::new(0.0, -300.0), // Stronger gravity for better platforming feel
-            ..default()
-        })
+
         .add_systems(Startup, setup)
         .add_systems(Update, (player_input, update_player))
         .run();

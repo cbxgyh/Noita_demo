@@ -271,18 +271,7 @@ fn create_comparison_shapes(mut commands: Commands) {
         },
         RigidBody::Dynamic,
         Collider::cuboid(50.0, 50.0),
-        Text2dBundle {
-            text: Text::from_section(
-                "AABB\n(simpler)",
-                TextStyle {
-                    font_size: 16.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 60.0, 1.0),
-            ..default()
-        },
+
     ));
 
     // Optimized collider (after optimization)
@@ -298,18 +287,7 @@ fn create_comparison_shapes(mut commands: Commands) {
         },
         RigidBody::Dynamic,
         Collider::cuboid(50.0, 50.0), // Simplified for demo
-        Text2dBundle {
-            text: Text::from_section(
-                "Optimized\n(ear clipping)",
-                TextStyle {
-                    font_size: 16.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 60.0, 1.0),
-            ..default()
-        },
+
     ));
 }
 

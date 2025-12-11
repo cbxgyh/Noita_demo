@@ -119,23 +119,7 @@ impl SleepingAtom {
         self.sleep_timer = 0.0;
     }
 
-    fn disturb_neighbors(&mut self, world: &mut SleepingWorld, x: usize, y: usize) {
-        // Wake up neighboring atoms when this atom moves
-        let neighbors = [
-            (x.wrapping_sub(1), y),
-            (x + 1, y),
-            (x, y.wrapping_sub(1)),
-            (x, y + 1),
-        ];
 
-        for (nx, ny) in neighbors {
-            if let Some(atom) = world.get_atom_mut(nx, ny) {
-                if atom.is_sleeping {
-                    atom.wake_up();
-                }
-            }
-        }
-    }
 }
 
 struct SleepingWorld {
@@ -188,7 +172,8 @@ impl SleepingWorld {
                     if was_moved {
                         self.active_atoms.insert((x, y));
                         // Wake up neighbors
-                        self.atoms[idx].disturb_neighbors(self, x, y);
+                        // self.atoms[idx].disturb_neighbors(self, x, y);
+                        self.disturb_neighbors(x, y);
                     }
                 }
             }
@@ -217,9 +202,10 @@ impl SleepingWorld {
                     if self.is_empty(x, y + 1) {
                         self.swap_atoms(x, y, x, y + 1);
                     } else {
-                        let dir = if rand::random::<bool>() { -1 } else { 1 };
-                        if self.is_empty(x + dir, y) {
-                            self.swap_atoms(x, y, x + dir, y);
+                        let dir: i32 = if rand::random::<bool>() { -1 } else { 1 };
+                        let new_x = x as i32 + dir;
+                        if new_x >= 0 && new_x < self.width as i32 && self.is_empty(new_x as usize, y) {
+                            self.swap_atoms(x, y, new_x as usize, y);
                         }
                     }
                 }
@@ -261,6 +247,24 @@ impl SleepingWorld {
             // Wake up the moved atoms
             self.atoms[idx1].wake_up();
             self.atoms[idx2].wake_up();
+        }
+    }
+
+    fn disturb_neighbors(&mut self, x: usize, y: usize) {
+        // Wake up neighboring atoms when this atom moves
+        let neighbors = [
+            (x.wrapping_sub(1), y),
+            (x + 1, y),
+            (x, y.wrapping_sub(1)),
+            (x, y + 1),
+        ];
+
+        for (nx, ny) in neighbors {
+            if let Some(atom) = self.get_atom_mut(nx, ny) {
+                if atom.is_sleeping {
+                    atom.wake_up();
+                }
+            }
         }
     }
 
@@ -346,17 +350,14 @@ fn render_sleeping_atoms(
     for atom in &world.0.atoms {
         if atom.atom_type != AtomType::Empty {
             let mut color = atom.atom_type.color();
+            let [r, g, b, a] = color.to_srgba().to_f32_array();
 
             // Highlight sleeping atoms with different brightness
             if atom.is_sleeping {
-                color = color.with_r(color.r() * 0.7)
-                           .with_g(color.g() * 0.7)
-                           .with_b(color.b() * 0.7);
+                color = Color::srgba(r * 0.7, g * 0.7, b * 0.7, a);
             } else {
                 // Highlight active atoms
-                color = color.with_r((color.r() + 0.3).min(1.0))
-                           .with_g((color.g() + 0.3).min(1.0))
-                           .with_b((color.b() + 0.3).min(1.0));
+                color = Color::srgba((r + 0.3).min(1.0), (g + 0.3).min(1.0), (b + 0.3).min(1.0), a);
             }
 
             let entity = commands.spawn(SpriteBundle {
@@ -387,7 +388,7 @@ fn handle_sleeping_input(
         if let Ok((camera, camera_transform)) = camera_query.get_single() {
             if let Some(window) = windows.iter().next() {
                 if let Some(cursor_pos) = window.cursor_position() {
-                    if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                         let atom_x = (world_pos.origin.x + world.0.width as f32 / 2.0) as f32;
                         let atom_y = (world_pos.origin.y + world.0.height as f32 / 2.0) as f32;
                         let position = Vec2::new(atom_x, atom_y);

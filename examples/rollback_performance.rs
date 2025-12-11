@@ -312,7 +312,7 @@ impl RollbackDemo {
         }
     }
 
-    fn update(&mut self, dt: f32, local_input: PlayerInput) {
+    fn update(&mut self, dt: f32,mut local_input: PlayerInput) {
         self.tick_timer += dt;
         self.stats.total_simulation_time += dt as f64;
 

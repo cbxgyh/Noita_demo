@@ -3,6 +3,7 @@
 // https://www.slowrush.dev/news/spraying-fluids
 
 use bevy::prelude::*;
+use bevy::tasks::futures_lite::StreamExt;
 use bevy_rapier2d::prelude::*;
 
 // Fluid spraying and particle systems
@@ -19,13 +20,14 @@ struct FluidParticle {
     id: u32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug,Eq, Hash, PartialEq)]
 enum FluidElement {
     Water,
     Oil,
     Acid,
     Fuel,
     Steam,
+    Fire,
 }
 
 impl FluidElement {
@@ -36,6 +38,7 @@ impl FluidElement {
             FluidElement::Acid => Color::rgba(0.8, 1.0, 0.2, 0.7),
             FluidElement::Fuel => Color::rgba(1.0, 0.6, 0.0, 0.8),
             FluidElement::Steam => Color::rgba(0.9, 0.9, 0.9, 0.5),
+            FluidElement::Fire => Color::rgba(1.0, 0.3, 0.0, 0.9),
         }
     }
 
@@ -46,6 +49,7 @@ impl FluidElement {
             FluidElement::Acid => 1.2,
             FluidElement::Fuel => 0.7,
             FluidElement::Steam => 0.1,
+            FluidElement::Fire => 0.05,
         }
     }
 
@@ -56,6 +60,7 @@ impl FluidElement {
             FluidElement::Acid => 1.5,
             FluidElement::Fuel => 0.5,
             FluidElement::Steam => 0.1,
+            FluidElement::Fire => 0.05,
         }
     }
 
@@ -66,6 +71,7 @@ impl FluidElement {
             FluidElement::Acid => 0.3,
             FluidElement::Fuel => 0.8,
             FluidElement::Steam => 0.0, // Already vapor
+            FluidElement::Fire => 1.0,
         }
     }
 }
@@ -225,12 +231,12 @@ impl FluidSprayer {
             // Random speed variation
             let speed = self.particle_speed * (0.8 + rand::random::<f32>() * 0.4);
             let velocity = direction * speed;
-
+            let next_particle_id=fluid_system.next_particle_id();
             fluid_system.add_particle(FluidParticle::new(
                 self.position,
                 velocity,
                 self.element.clone(),
-                fluid_system.next_particle_id(),
+                next_particle_id,
             ));
         }
     }
@@ -288,15 +294,26 @@ impl FluidSystem {
 
     fn update(&mut self, dt: f32) {
         // Update all particles
-        for i in 0..self.particles.len() {
-            if let Some(particle) = self.particles.get_mut(i) {
-                particle.update(dt, self);
+        // for i in 0..self.particles.len() {
+        //     if let Some(particle) = self.particles.get_mut(i) {
+        //         particle.update(dt, self);
+        //     }
+        // }
+        //
+        // // Remove dead particles
+        // self.particles.retain(|p| p.is_alive());
+        let mut i = 0;
+        while i < self.particles.len() {
+            let mut particle = self.particles.remove(i);
+            particle.update(dt, self);
+
+            if particle.is_alive() {
+                // Reinsert the updated atom and advance.
+                self.particles.insert(i, particle);
+                i += 1;
             }
+            // Dead atoms are dropped; newly spawned atoms (via add_atom) are appended.
         }
-
-        // Remove dead particles
-        self.particles.retain(|p| p.is_alive());
-
         // Limit particle count for performance
         if self.particles.len() > 1000 {
             self.particles.truncate(800);
@@ -385,7 +402,7 @@ fn handle_fluid_spray_input(
     if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     demo.mouse_position = world_pos.origin.truncate();
                 }
             }
@@ -440,15 +457,17 @@ fn handle_fluid_spray_input(
             sprayer.is_active = false;
         }
     }
-
+    let mouse_position = demo.mouse_position.clone();
+    let selected_element =demo.selected_element.clone();
+    let fluid_system =demo.fluid_system.next_particle_id();
     // Manual particle creation
     if mouse_input.pressed(MouseButton::Left) {
-        let velocity = (demo.mouse_position - Vec2::new(400.0, 300.0)).normalize() * 150.0;
+        let velocity = (mouse_position - Vec2::new(400.0, 300.0)).normalize() * 150.0;
         demo.fluid_system.add_particle(FluidParticle::new(
-            demo.mouse_position,
+            mouse_position,
             velocity,
-            demo.selected_element.clone(),
-            demo.fluid_system.next_particle_id(),
+            selected_element,
+            fluid_system,
         ));
     }
 
@@ -460,7 +479,7 @@ fn handle_fluid_spray_input(
 
     // Adjust sprayer directions toward mouse
     for sprayer in &mut demo.sprayers {
-        let direction = (demo.mouse_position - sprayer.position).normalize();
+        let direction = (mouse_position - sprayer.position).normalize();
         sprayer.set_direction(direction);
     }
 }
@@ -487,7 +506,7 @@ fn render_fluid_spray_demo(
     for particle in &demo.fluid_system.particles {
         let alpha = particle.lifetime / particle.max_lifetime;
         let mut color = particle.element.color();
-        color.set_a(color.a() * alpha);
+        color.set_alpha(color.alpha() * alpha);
 
         let entity = commands.spawn(SpriteBundle {
             sprite: Sprite {
@@ -520,7 +539,7 @@ fn render_fluid_spray_demo(
                 transform: Transform::from_xyz(sprayer.position.x, sprayer.position.y, 1.0),
                 ..default()
             },
-            T
+
         )).id();
         sprayer_entities.push(entity);
     }

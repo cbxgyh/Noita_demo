@@ -161,7 +161,7 @@ impl AnimationTimeline {
                 speed: 1.0,
                 id: self.active_animations.len(),
             };
-            self.active_animations.push(active);
+            self.active_animations.push(active.clone());
             Some(active.id)
         } else {
             None
@@ -286,7 +286,7 @@ impl CombatEntity {
 
                 // Update projectile spawn position in the event
                 if let Some(active) = self.animation_timeline.active_animations.last_mut() {
-                    if let Some(animation) = self.animation_timeline.animations.get(&active.animation_name) {
+                    if let Some( animation) = self.animation_timeline.animations.get_mut(&active.animation_name) {
                         for event in &mut animation.events {
                             if let AnimationEventData::ProjectileSpawn { position, velocity, .. } = &mut event.data {
                                 *position = self.position;
@@ -552,8 +552,9 @@ fn handle_timing_input(
     }
 
     if keyboard_input.just_pressed(KeyCode::KeyA) {
+        let current_time=demo.current_time;
         if let Some(archer) = demo.entities.first_mut() {
-            archer.attack(Vec2::new(500.0, 250.0), demo.current_time);
+            archer.attack(Vec2::new(500.0, 250.0), current_time);
         }
     }
 

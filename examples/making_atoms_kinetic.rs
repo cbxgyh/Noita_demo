@@ -234,38 +234,78 @@ impl KineticAtomWorld {
 
     fn resolve_collisions(&mut self) {
         // Simple collision detection - check each atom against its neighbors
-        for y in 0..self.height {
-            for x in 0..self.width {
-                if let Some(atom) = self.get_atom_mut(x, y) {
-                    if atom.atom_type == AtomType::Empty {
-                        continue;
-                    }
+        let width = self.width;
+        let height = self.height;
+        
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                
+                // Skip empty atoms
+                if self.atoms[idx].atom_type == AtomType::Empty {
+                    continue;
+                }
 
-                    // Check neighbors
-                    let neighbors = [
-                        (x.wrapping_sub(1), y),
-                        (x + 1, y),
-                        (x, y.wrapping_sub(1)),
-                        (x, y + 1),
-                        (x.wrapping_sub(1), y.wrapping_sub(1)),
-                        (x + 1, y.wrapping_sub(1)),
-                        (x.wrapping_sub(1), y + 1),
-                        (x + 1, y + 1),
-                    ];
-
-                    for (nx, ny) in neighbors {
-                        if nx < self.width && ny < self.height {
-                            if let Some(other_atom) = self.get_atom_mut(nx, ny) {
-                                if other_atom.atom_type != AtomType::Empty && atom.collides_with(other_atom) {
-                                    let mut atom_copy = atom.clone();
-                                    let mut other_copy = other_atom.clone();
-
-                                    atom_copy.resolve_collision(&mut other_copy);
-
-                                    *atom = atom_copy;
-                                    *other_atom = other_copy;
-                                }
-                            }
+                // Check neighbors
+                let neighbors = [
+                    (x.wrapping_sub(1), y),
+                    (x + 1, y),
+                    (x, y.wrapping_sub(1)),
+                    (x, y + 1),
+                    (x.wrapping_sub(1), y.wrapping_sub(1)),
+                    (x + 1, y.wrapping_sub(1)),
+                    (x.wrapping_sub(1), y + 1),
+                    (x + 1, y + 1),
+                ];
+                //   for (nx, ny) in neighbors {
+                //                         if nx < width && ny < height {
+                //                             if let Some(other_atom) = self.get_atom_mut(nx, ny) {
+                //                                 if other_atom.atom_type != AtomType::Empty && atom.collides_with(other_atom) {
+                //                                     let mut atom_copy = atom.clone();
+                //                                     let mut other_copy = other_atom.clone();
+                //
+                //                                     atom_copy.resolve_collision(&mut other_copy);
+                //
+                //                                     *atom = atom_copy;
+                //                                     *other_atom = other_copy;
+                //                                 }
+                //                             }
+                //                         }
+                //                     }
+                //                 }   ##
+                // 代码同时持有 atom 和 other_atom 的可变借用
+                // Rust 不允许对同一个 self 同时持有多个可变借用
+                // 解决方案：
+                // 使用索引直接访问：使用 self.atoms[idx] 和 self.atoms[other_idx]，而不是通过 get_atom_mut
+                // 先克隆后修改：
+                // 克隆两个原子
+                // 在克隆上检查碰撞和执行碰撞解析
+                // 将结果写回原位置
+                // 避免同时持有多个可变借用：每次只在一个原子上的操作完成后再操作另一个
+                // 代码现在应可正常编译。此方法通过使用索引和克隆，既符合 Rust 的借用规则，又保持了原有逻辑。
+                for (nx, ny) in neighbors {
+                    if nx < width && ny < height {
+                        let other_idx = ny * width + nx;
+                        
+                        // Skip if either atom is empty
+                        if self.atoms[other_idx].atom_type == AtomType::Empty {
+                            continue;
+                        }
+                        
+                        // Clone both atoms to check collision without borrowing
+                        let atom_copy = self.atoms[idx].clone();
+                        let other_copy = self.atoms[other_idx].clone();
+                        
+                        // Check if they collide
+                        if atom_copy.collides_with(&other_copy) {
+                            // Resolve collision with clones
+                            let mut mut_atom_copy = atom_copy;
+                            let mut mut_other_copy = other_copy;
+                            mut_atom_copy.resolve_collision(&mut mut_other_copy);
+                            
+                            // Write back the results
+                            self.atoms[idx] = mut_atom_copy;
+                            self.atoms[other_idx] = mut_other_copy;
                         }
                     }
                 }

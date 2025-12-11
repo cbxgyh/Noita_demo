@@ -151,7 +151,8 @@ impl ProceduralAudioEngine {
     }
 
     fn play_reaction_sound(&mut self, position: Vec2, elements: Vec<Element>, intensity: f32) {
-        let sound = ReactionSound::new(self.next_sound_id, position, elements, intensity);
+        // Clone so we can both log and store
+        let sound = ReactionSound::new(self.next_sound_id, position, elements.clone(), intensity);
         self.sounds.push(sound);
         self.next_sound_id += 1;
 
@@ -291,11 +292,13 @@ impl AtomicPhysics {
 
         // Process reactions
         for (position, new_elements, intensity, particle_indices) in reactions {
-            audio_engine.play_reaction_sound(position, new_elements, intensity);
+            // Clone elements for audio so we can still iterate them below
+            audio_engine.play_reaction_sound(position, new_elements.clone(), intensity);
 
             // Remove reacting particles and add new ones
             for &index in &particle_indices {
-                if let Some(particle) = self.particles.get(index) {
+                // Clone particle data so we can mutably borrow self later
+                if let Some(particle) = self.particles.get(index).cloned() {
                     // Create new particles based on the reaction result
                     for new_element in &new_elements {
                         self.add_particle(
@@ -394,7 +397,7 @@ fn handle_atomic_input(
     let mouse_pos = if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     world_pos.origin.truncate()
                 } else {
                     Vec2::ZERO
@@ -499,17 +502,7 @@ fn render_atomic_demo(
                 transform: Transform::from_xyz(particle.position.x, particle.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{:?}", particle.element),
-                    TextStyle {
-                        font_size: 6.0,
-                        color: Color::BLACK,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         particle_entities.push(entity);
     }
@@ -530,17 +523,7 @@ fn render_atomic_demo(
                 transform: Transform::from_xyz(sound.position.x, sound.position.y + 50.0 + i as f32 * 25.0, 2.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("Reaction: {} elements", sound.elements.len()),
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         sound_entities.push(sound_entity);
     }

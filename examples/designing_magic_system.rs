@@ -8,7 +8,7 @@ use std::collections::HashMap;
 // Magic system design focused on spell creation and enemy targeting
 // Demonstrates how magic integrates with gameplay and provides goals
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,PartialEq)]
 enum Element {
     Fire,
     Water,
@@ -20,7 +20,7 @@ enum Element {
     Healing,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Eq, PartialEq)]
 enum SpellShape {
     Projectile,
     Area,
@@ -30,7 +30,7 @@ enum SpellShape {
     Teleport,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Spell {
     name: String,
     elements: Vec<Element>,
@@ -140,7 +140,7 @@ impl GameWorld {
 
     fn spawn_enemy(&mut self, position: Vec2) {
         let elements = vec![Element::Fire, Element::Water, Element::Earth, Element::Air];
-        let weakness = elements[rand::random::<usize>() % elements.len()];
+        let weakness = elements[rand::random::<usize>() % elements.len()].clone();
 
         self.enemies.push(Enemy {
             position,
@@ -154,7 +154,8 @@ impl GameWorld {
 
     fn cast_spell(&mut self, target_pos: Vec2) {
         if let Some(spell) = self.player.spells.get(self.player.selected_spell).cloned() {
-            if self.player.mana >= spell.mana_cost {
+            let mana_cost = spell.mana_cost;
+            if self.player.mana >= mana_cost {
                 let direction = (target_pos - self.player.position).normalize();
                 let speed = match spell.shape {
                     SpellShape::Projectile => 200.0,
@@ -171,7 +172,7 @@ impl GameWorld {
                     target: None,
                 });
 
-                self.player.mana -= spell.mana_cost;
+                self.player.mana -= mana_cost;
             }
         }
     }
@@ -217,11 +218,10 @@ impl GameWorld {
                     let mut damage = spell.spell.damage;
 
                     // Check elemental weakness
-                    if let Some(weakness) = enemy.element_weakness {
-                        if spell.spell.elements.contains(&weakness) {
+                    if let Some(weakness) = &enemy.element_weakness {
+                        if spell.spell.elements.contains(weakness) {
                             damage *= 2.0; // Critical hit!
-                            println!("Critical hit! {} is weak to {:?}",
-                                   enemy.element_weakness.unwrap() as usize, weakness);
+                            println!("Critical hit! Enemy is weak to {:?}", weakness);
                         }
                     }
 
@@ -326,18 +326,7 @@ fn render_magic_world(
             transform: Transform::from_xyz(world.0.player.position.x, world.0.player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                format!("Mana: {:.0}/{:.0}", world.0.player.mana, world.0.player.max_mana),
-                TextStyle {
-                    font_size: 16.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 30.0, 2.0),
-            ..default()
-        },
+
     )).id();
     *player_entity = Some(player_entity_id);
 
@@ -415,7 +404,7 @@ fn handle_magic_input(
         if let Ok((camera, camera_transform)) = camera_query.get_single() {
             if let Some(window) = windows.iter().next() {
                 if let Some(cursor_pos) = window.cursor_position() {
-                    if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                         world.0.cast_spell(world_pos.origin.truncate());
                     }
                 }

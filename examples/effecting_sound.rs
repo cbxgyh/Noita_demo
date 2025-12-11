@@ -457,7 +457,12 @@ fn handle_sound_input(
     }
 
     if keyboard_input.just_pressed(KeyCode::Space) {
-        demo.player.jump(&mut demo.audio_engine);
+        // Avoid double borrow by inlining jump logic
+        if demo.player.on_ground {
+            demo.player.velocity.y = 200.0;
+            demo.player.on_ground = false;
+            demo.audio_engine.play_sound("jump", demo.player.position);
+        }
     }
 
     // Sound event triggers
@@ -541,18 +546,7 @@ fn render_sound_demo(
             transform: Transform::from_xyz(demo.player.position.x, demo.player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                "Player",
-                TextStyle {
-                    font_size: 12.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 25.0, 2.0),
-            ..default()
-        },
+
     )).id();
     entity_entities.push(player_entity);
 
@@ -568,18 +562,7 @@ fn render_sound_demo(
                 transform: Transform::from_xyz(enemy.position.x, enemy.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    &enemy.name,
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 20.0, 2.0),
-                    ..default()
-            },
+
         )).id();
         entity_entities.push(enemy_entity);
     }
@@ -600,17 +583,7 @@ fn render_sound_demo(
                 transform: Transform::from_xyz(sound.position.x, sound.position.y + 50.0 + i as f32 * 15.0, 2.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{} ({:.1})", sound.sound_id, volume),
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         sound_entities.push(sound_entity);
     }

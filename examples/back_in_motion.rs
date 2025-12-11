@@ -306,7 +306,7 @@ impl Character {
 
         // Update animation if state changed
         if self.state != self.last_state {
-            self.play_animation_for_state(&self.state);
+            self.play_animation_for_state(&self.state.clone());
         }
 
         // Adjust animation speed based on movement
@@ -447,8 +447,6 @@ fn handle_animation_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut demo: ResMut<AnimationDemo>,
 ) {
-    demo.update(1.0 / 60.0, &CharacterInput::default());
-
     // Control first character manually
     if let Some(character) = demo.characters.get_mut(0) {
         let mut input = CharacterInput::default();
@@ -463,11 +461,11 @@ fn handle_animation_input(
 
     // Make other characters move automatically for demo
     for i in 1..demo.characters.len() {
+        let time = demo.current_time;
         if let Some(character) = demo.characters.get_mut(i) {
             let mut input = CharacterInput::default();
 
             // Simple AI: move back and forth
-            let time = demo.current_time;
             let should_move_right = (time * 2.0).sin() > 0.0;
             input.move_right = should_move_right;
             input.move_left = !should_move_right;
@@ -527,18 +525,7 @@ fn render_animation_demo(
                 transform: character.get_sprite_transform(),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("Frame: {}", sprite_index),
-                    TextStyle {
-                        font_size: 12.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 20.0, 1.0),
-                ..default()
-            },
+
         )).id();
         character_entities.push(entity);
     }

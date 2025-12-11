@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::collections::VecDeque;
-
+use std::ops::Add;
 // Handling bad network conditions
 // Demonstrates network resilience, error correction, and adaptive strategies
 
@@ -105,7 +105,7 @@ struct NetworkPacket {
     priority: PacketPriority,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy,Clone, Debug, PartialEq)]
 enum PacketPriority {
     Critical,    // State updates, important inputs
     Important,   // Regular updates
@@ -114,12 +114,13 @@ enum PacketPriority {
 
 impl NetworkPacket {
     fn new(id: u64, sequence_number: u32, data: Vec<u8>, priority: PacketPriority) -> Self {
+        let len =data.len();
         Self {
             id,
             sequence_number,
             data,
             send_time: 0.0,
-            size_bytes: data.len(),
+            size_bytes: len,
             requires_ack: matches!(priority, PacketPriority::Critical),
             priority,
         }
@@ -368,14 +369,13 @@ impl NetworkSimulator {
                 let delivery = self.packet_queue.pop_front().unwrap();
 
                 if !delivery.corrupted && self.reliability_system.process_received_packet(&delivery.packet) {
-                    received_packets.push(delivery.packet);
-
                     // Send ACK for reliable packets
                     if delivery.packet.requires_ack {
                         // In real implementation, would send ACK
                         self.reliability_system.receive_ack(delivery.packet.id, self.current_time);
                         self.congestion_control.on_ack_received();
                     }
+                    received_packets.push(delivery.packet);
                 } else if delivery.corrupted {
                     println!("Corrupted packet received: {}", delivery.packet.id);
                 }
@@ -401,9 +401,10 @@ impl NetworkSimulator {
     }
 
     fn set_conditions(&mut self, conditions: NetworkCondition) {
-        self.conditions = conditions;
+
         println!("Network conditions changed to: {:.0}ms latency, {:.1}% loss",
                 conditions.latency_ms, conditions.packet_loss_percent);
+        self.conditions = conditions;
     }
 }
 
@@ -453,7 +454,7 @@ impl BadNetworksDemo {
     }
 
     fn update(&mut self, dt: f32) {
-        self.current_time += dt;
+        self.current_time += dt as f64;
         self.packet_send_timer += dt;
 
         // Send packets periodically
@@ -466,7 +467,6 @@ impl BadNetworksDemo {
                 PacketPriority::Important,
                 PacketPriority::Optional,
             ];
-
             let priority = priorities[rand::random::<usize>() % priorities.len()];
             let data_size = match priority {
                 PacketPriority::Critical => 64,
@@ -503,6 +503,8 @@ fn main() {
                 title: "Bad Networks - Resilience & Error Correction".to_string(),
                 resolution: (800.0, 600.0).into(),
                 ..default()
+            }),
+            ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(32.0))
         .insert_resource(BadNetworksDemo::new())
@@ -575,18 +577,7 @@ fn render_bad_networks_demo(
             transform: Transform::from_xyz(350.0, 250.0, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                demo.condition_names[demo.current_condition],
-                TextStyle {
-                    font_size: 16.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, -35.0, 2.0),
-            ..default()
-        },
+
     )).id();
     packet_entities.push(condition_entity);
 
@@ -611,18 +602,7 @@ fn render_bad_networks_demo(
                 transform: Transform::from_xyz(100.0, y_offset, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("Seq: {}", delivery.packet.sequence_number),
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(80.0, 0.0, 2.0),
-                ..default()
-            },
+
         )).id();
         packet_entities.push(packet_entity);
         y_offset -= 15.0;

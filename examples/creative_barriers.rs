@@ -8,7 +8,7 @@ use bevy_rapier2d::prelude::*;
 // Creative barriers and level design challenges
 // Demonstrates barriers that encourage creative problem solving
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum BarrierType {
     Wall,
     SpikeTrap,
@@ -132,6 +132,12 @@ enum PlayerAction {
     ActivateSwitch(Vec2),
 }
 
+#[derive(Clone, Debug)]
+struct PlayerInput {
+    move_x: f32,
+    jump: bool,
+}
+
 struct CreativeLevel {
     barriers: Vec<Barrier>,
     player: Player,
@@ -196,17 +202,18 @@ impl CreativeLevel {
         self.player.velocity.x = input.move_x * 150.0;
         self.player.velocity.y -= 300.0 * dt; // Gravity
 
-        let new_position = self.player.position + self.player.velocity * dt;
+        let mut new_position = self.player.position + self.player.velocity * dt;
 
         // Collision detection with barriers
         let player_rect = Rect::from_center_size(new_position, self.player.size);
 
         for barrier in &self.barriers {
             let barrier_rect = Rect::from_center_size(barrier.position, barrier.size);
+            let intersection = player_rect.intersect(barrier_rect);
 
-            if player_rect.intersect(barrier_rect).is_some() {
+            if intersection.width() > 0.0 && intersection.height() > 0.0 {
                 match barrier.barrier_type {
-                    BarrierType::Wall | BarrierType::Door => {
+                    BarrierType::Wall => {
                         // Block movement
                         if (new_position.x - self.player.position.x).abs() > (new_position.y - self.player.position.y).abs() {
                             new_position.x = self.player.position.x;
@@ -214,6 +221,17 @@ impl CreativeLevel {
                             new_position.y = self.player.position.y;
                         }
                         self.player.velocity = Vec2::ZERO;
+                    }
+                    BarrierType::Door => {
+                        // Only block if door is not activated (closed)
+                        if !barrier.activated {
+                            if (new_position.x - self.player.position.x).abs() > (new_position.y - self.player.position.y).abs() {
+                                new_position.x = self.player.position.x;
+                            } else {
+                                new_position.y = self.player.position.y;
+                            }
+                            self.player.velocity = Vec2::ZERO;
+                        }
                     }
                     BarrierType::SpikeTrap => {
                         self.player.take_damage(50.0 * dt);
@@ -254,18 +272,23 @@ impl CreativeLevel {
         for action in actions {
             match action {
                 PlayerAction::ActivateSwitch(pos) => {
+                    let mut doors_to_activate = Vec::new();
                     for barrier in &mut self.barriers {
                         if barrier.barrier_type == BarrierType::Switch {
                             let switch_rect = Rect::from_center_size(barrier.position, barrier.size);
                             if switch_rect.contains(*pos) {
                                 barrier.activate();
-                                // Open connected door
+                                // Collect door indices to activate
                                 if let Some(door_idx) = barrier.connected_door {
-                                    if let Some(door) = self.barriers.get_mut(door_idx) {
-                                        door.deactivate(); // Door becomes passable
-                                    }
+                                    doors_to_activate.push(door_idx);
                                 }
                             }
+                        }
+                    }
+                    // Open connected doors
+                    for door_idx in doors_to_activate {
+                        if let Some(door) = self.barriers.get_mut(door_idx) {
+                            door.activate(); // Door becomes passable
                         }
                     }
                 }
@@ -387,7 +410,7 @@ fn handle_creative_input(
         if let Ok((camera, camera_transform)) = camera_query.get_single() {
             if let Some(window) = windows.iter().next() {
                 if let Some(cursor_pos) = window.cursor_position() {
-                    if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                         if let Some(action) = level.0.player.use_tool(world_pos.origin.truncate()) {
                             actions.push(action);
                         }
@@ -456,18 +479,7 @@ fn render_creative_level(
             transform: Transform::from_xyz(level.0.player.position.x, level.0.player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                format!("HP: {:.0}", level.0.player.health),
-                TextStyle {
-                    font_size: 12.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 20.0, 2.0),
-            ..default()
-        },
+
     )).id();
     *player_entity = Some(entity);
 
@@ -483,17 +495,7 @@ fn render_creative_level(
             transform: Transform::from_xyz(goal_pos.x, goal_pos.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                "GOAL",
-                TextStyle {
-                    font_size: 10.0,
-                    color: Color::BLACK,
-                    ..default()
-                },
-            ),
-            ..default()
-        },
+
     )).id();
     objective_entities.push(goal_entity);
 }

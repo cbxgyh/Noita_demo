@@ -490,18 +490,7 @@ fn render_funding_game(
                 transform: Transform::from_xyz(crate_.position.x, crate_.position.y, 0.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    if crate_.is_open { "OPEN" } else { "PRESS E" },
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 25.0, 1.0),
-                ..default()
-            },
+
         )).id();
         crate_entities.push(entity);
     }

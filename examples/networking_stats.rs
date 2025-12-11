@@ -480,18 +480,7 @@ fn render_networking_stats_demo(
             transform: Transform::from_xyz(350.0, 250.0, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                quality.description(),
-                TextStyle {
-                    font_size: 16.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, -30.0, 2.0),
-            ..default()
-        },
+
     )).id();
     stat_entities.push(quality_entity);
 
@@ -517,18 +506,7 @@ fn render_networking_stats_demo(
                 transform: Transform::from_xyz(100.0, y_offset, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{:?}", packet.packet_type),
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(60.0, 0.0, 2.0),
-                ..default()
-            },
+
         )).id();
         stat_entities.push(packet_entity);
         y_offset -= 12.0;

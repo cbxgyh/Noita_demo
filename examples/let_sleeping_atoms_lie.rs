@@ -8,7 +8,7 @@ use std::collections::HashSet;
 // Atom sleeping system - don't update atoms that haven't moved recently
 // Performance optimization for large atom worlds
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Eq, PartialEq)]
 enum AtomType {
     Empty,
     Sand,

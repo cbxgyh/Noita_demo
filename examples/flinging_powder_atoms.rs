@@ -452,18 +452,7 @@ fn render_powder_world(
             transform: Transform::from_xyz(world.0.player.position.x, world.0.player.position.y, 2.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                format!("Powder: {:?}", world.0.player.selected_powder),
-                TextStyle {
-                    font_size: 14.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 20.0, 3.0),
-            ..default()
-        },
+
     )).id();
     *player_entity = Some(entity);
 }
@@ -491,7 +480,7 @@ fn handle_powder_input(
         if let Ok((camera, camera_transform)) = camera_query.get_single() {
             if let Some(window) = windows.iter().next() {
                 if let Some(cursor_pos) = window.cursor_position() {
-                    if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                         world.0.player.throw_grenade(world_pos.origin.truncate());
                     }
                 }
@@ -504,7 +493,7 @@ fn handle_powder_input(
         if let Ok((camera, camera_transform)) = camera_query.get_single() {
             if let Some(window) = windows.iter().next() {
                 if let Some(cursor_pos) = window.cursor_position() {
-                    if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                         // Apply force to blow powder around
                         world.0.apply_force_in_area(world_pos.origin.truncate(), 50.0, Vec2::new(0.0, 100.0));
                     }
@@ -518,7 +507,7 @@ fn handle_powder_input(
         if let Ok((camera, camera_transform)) = camera_query.get_single() {
             if let Some(window) = windows.iter().next() {
                 if let Some(cursor_pos) = window.cursor_position() {
-                    if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                         world.0.ignite_area(world_pos.origin.truncate(), 30.0);
                     }
                 }

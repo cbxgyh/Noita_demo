@@ -8,7 +8,7 @@ use bevy_rapier2d::prelude::*;
 // Steam and poison systems
 // Demonstrates fire boiling water into steam, and acid mixing with water to create poison
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Eq, PartialEq)]
 enum Substance {
     Empty,
     Stone,
@@ -306,9 +306,16 @@ impl ChemicalWorld {
                         if nx >= 0 && nx < self.width as i32 && ny >= 0 && ny < self.height as i32 {
                             let nidx = ny as usize * self.width + nx as usize;
 
-                            if self.atoms[idx].can_react_with(&self.atoms[nidx].substance) {
-                                let products = self.atoms[idx].react_with(&mut self.atoms[nidx]);
-                                reaction_products.extend(products);
+                            // Only process each pair once and split the slice to get two mutable refs
+                            if idx < nidx {
+                                let (left, right) = self.atoms.split_at_mut(nidx);
+                                let atom_a = &mut left[idx];
+                                let atom_b = &mut right[0];
+
+                                if atom_a.can_react_with(&atom_b.substance) {
+                                    let products = atom_a.react_with(atom_b);
+                                    reaction_products.extend(products);
+                                }
                             }
                         }
                     }
@@ -376,7 +383,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Boil and Toil - Steam and Poison Chemistry".to_string(),
-                resolution: (1000, 800).into(),
+                resolution: (1000., 800.).into(),
                 ..default()
             }),
             ..default()
@@ -419,14 +426,15 @@ fn render_chemical_world(
 
             // Show temperature with brightness
             let temp_factor = ((atom.temperature - 20.0) / 200.0).max(0.0).min(1.0);
-            color = color.with_r((color.r() + temp_factor * 0.3).min(1.0))
-                        .with_g((color.g() + temp_factor * 0.3).min(1.0))
-                        .with_b((color.b() + temp_factor * 0.3).min(1.0));
+            let [r, g, b, a] = color.to_srgba().to_f32_array();
+            let factor =(temp_factor * 0.3).min(1.0);
+            color = Color::rgba(r*factor, g*factor, b*factor, a);
+
 
             // Steam has different opacity based on temperature
             if atom.substance == Substance::Steam {
                 let alpha = (atom.temperature / 150.0).max(0.3);
-                color = color.with_a(alpha);
+                color.set_alpha(alpha);
             }
 
             let entity = commands.spawn(SpriteBundle {
@@ -457,7 +465,7 @@ fn handle_chemical_input(
     if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     let atom_x = (world_pos.origin.x + world.0.width as f32 / 2.0) as f32;
                     let atom_y = (world_pos.origin.y + world.0.height as f32 / 2.0) as f32;
                     let position = Vec2::new(atom_x, atom_y);

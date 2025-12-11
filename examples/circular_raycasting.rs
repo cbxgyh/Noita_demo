@@ -113,7 +113,7 @@ impl CircularRaycaster {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct Ray {
     origin: Vec2,
     direction: Vec2,
@@ -219,7 +219,7 @@ impl Obstacle {
         let min = center - half_size;
         let max = center + half_size;
 
-        let mut t_min = 0.0;
+        let mut t_min = 0.0f32;
         let mut t_max = max_distance;
 
         for i in 0..2 {
@@ -239,7 +239,7 @@ impl Obstacle {
                 let t_near = t1.min(t2);
                 let t_far = t1.max(t2);
 
-                t_min = t_min.max(t_near);
+                t_min = t_min.max(t_near  );
                 t_max = t_max.min(t_far);
 
                 if t_min > t_max {
@@ -304,7 +304,7 @@ impl Obstacle {
             return None; // Parallel
         }
 
-        let t1 = v2.cross(v1) / dot;
+        let t1 = v2.perp_dot(v1) / dot;
         let t2 = v1.dot(v3) / dot;
 
         if t1 >= 0.0 && t2 >= 0.0 && t2 <= 1.0 {
@@ -345,7 +345,7 @@ impl Obstacle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Resource)]
 struct CircularRaycastDemo {
     raycaster: CircularRaycaster,
     obstacles: Vec<Obstacle>,
@@ -442,7 +442,7 @@ fn handle_circular_raycast_input(
     let mouse_pos = if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     world_pos.origin.truncate()
                 } else {
                     Vec2::ZERO
@@ -529,7 +529,7 @@ fn render_circular_raycast_demo(
     // Render raycaster center
     let center_entity_id = commands.spawn(SpriteBundle {
         sprite: Sprite {
-            color: Color::rgb(1.0, 1.0, 0.0),
+            color: Color::srgb(1.0, 1.0, 0.0),
             custom_size: Some(Vec2::new(10.0, 10.0)),
             ..default()
         },
@@ -548,12 +548,12 @@ fn render_circular_raycast_demo(
 
         let ray_entity = commands.spawn(SpriteBundle {
             sprite: Sprite {
-                color: Color::rgba(0.0, 1.0, 0.0, 0.3),
+                color: Color::srgba(0.0, 1.0, 0.0, 0.3),
                 custom_size: Some(Vec2::new(2.0, ray_result.ray.origin.distance(end_point))),
                 ..default()
             },
             transform: Transform {
-                translation: (ray_result.ray.origin + end_point) / 2.0 * Vec3::new(1.0, 1.0, 0.0),
+                translation: ((ray_result.ray.origin + end_point) / 2.0).extend(0.0),
                 rotation: Quat::from_rotation_z(
                     (end_point - ray_result.ray.origin).angle_between(Vec2::Y)
                 ),

@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 // Simplified atom world for demonstration
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug,Eq, PartialEq)]
 enum AtomType {
     Empty,
     Sand,

@@ -19,10 +19,10 @@ enum DebrisType {
 impl DebrisType {
     fn color(&self) -> Color {
         match self {
-            DebrisType::Stone => Color::rgb(0.5, 0.5, 0.5),
-            DebrisType::Metal => Color::rgb(0.7, 0.7, 0.8),
-            DebrisType::Wood => Color::rgb(0.6, 0.4, 0.2),
-            DebrisType::Glass => Color::rgba(0.8, 0.9, 1.0, 0.7),
+            DebrisType::Stone => Color::srgb(0.5, 0.5, 0.5),
+            DebrisType::Metal => Color::srgb(0.7, 0.7, 0.8),
+            DebrisType::Wood => Color::srgb(0.6, 0.4, 0.2),
+            DebrisType::Glass => Color::srgba(0.8, 0.9, 1.0, 0.7),
         }
     }
 
@@ -319,6 +319,8 @@ fn main() {
                 title: "Big Bada Boom - Explosive Destruction".to_string(),
                 resolution: (1000.0, 800.0).into(),
                 ..default()
+            }),
+            ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(32.0))
         .insert_resource(DestructionWorldResource(DestructionWorld::new(1000.0, 800.0)))
@@ -362,13 +364,10 @@ fn render_destruction_world(
     // Render destructible objects
     for obj in &world.0.destructible_objects {
         let health_percent = obj.health / obj.max_health;
-        let mut color = obj.debris_type.color();
-
-        // Darken based on damage
-        color = color.with_r(color.r() * health_percent.max(0.3));
-        color = color.with_g(color.g() * health_percent.max(0.3));
-        color = color.with_b(color.b() * health_percent.max(0.3));
-
+        let base_color = obj.debris_type.color();
+        let [r, g, b, a] = base_color.to_srgba().to_f32_array();
+        let factor = health_percent.max(0.3);
+        let color = Color::srgba(r * factor, g * factor, b * factor, a);
         let entity = commands.spawn(SpriteBundle {
             sprite: Sprite {
                 color,
@@ -425,7 +424,7 @@ fn handle_destruction_input(
     if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     let atom_x = world_pos.origin.x;
                     let atom_y = world_pos.origin.y;
 

@@ -19,7 +19,7 @@ struct Player {
     last_acknowledged_input: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Default)]
 struct PlayerInput {
     frame: u32,
     move_x: f32,
@@ -197,9 +197,12 @@ fn update_network_simulation(
     network.current_frame += 1;
     let dt = time.delta_seconds();
 
+    let game_worldw =game_world.width;
+    let game_worldh =game_world.height;
+
     // Update game world
     for player in &mut game_world.players {
-        update_player_physics(player, dt, game_world.width, game_world.height);
+        update_player_physics(player, dt, game_worldw, game_worldh);
 
         // Store predicted position
         player.predicted_position = player.position;
@@ -308,12 +311,13 @@ fn simulate_network_conditions(
                     jump: rand::random::<f32>() < 0.1,
                 };
 
-                input_buffer.remote_inputs.push_back(remote_input);
+
 
                 // Apply remote input
                 if let Some(remote_player) = game_world.players.get_mut(network.remote_player_id as usize) {
-                    remote_player.input = remote_input;
+                    remote_player.input = remote_input.clone();
                 }
+                input_buffer.remote_inputs.push_back(remote_input);
             }
         }
     }
@@ -418,18 +422,7 @@ fn render_network_demo(
                 transform: Transform::from_xyz(player.position.x, player.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("P{} ({:.0}ms)", player.id + 1, network.ping),
-                    TextStyle {
-                        font_size: 12.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 20.0, 2.0),
-                ..default()
-            },
+
         )).id();
         player_entities.push(entity);
     }

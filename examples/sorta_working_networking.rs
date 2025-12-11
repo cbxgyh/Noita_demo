@@ -511,18 +511,7 @@ fn render_networking_demo(
                 transform: Transform::from_xyz(entity.position.x, entity.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("P{}: {:.0}", entity.id + 1, entity.health),
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 18.0, 2.0),
-                ..default()
-            },
+
         )).id();
         entity_entities.push(entity_bundle);
     }

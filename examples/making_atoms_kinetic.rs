@@ -8,7 +8,7 @@ use rand::Rng;
 // Kinetic atoms with inertia and velocity
 // Demonstrates how atoms gain momentum and behave more realistically
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Eq, PartialEq)]
 enum AtomType {
     Empty,
     Sand,
@@ -423,7 +423,7 @@ fn handle_user_interaction(
     if let Ok((camera, camera_transform)) = camera_query.get_single() {
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                     let atom_x = (world_pos.origin.x + world.0.width as f32 / 2.0) as usize;
                     let atom_y = (world_pos.origin.y + world.0.height as f32 / 2.0) as usize;
 

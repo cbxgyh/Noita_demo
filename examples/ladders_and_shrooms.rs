@@ -63,9 +63,9 @@ impl InteractiveObject {
     fn contains_point(&self, point: Vec2) -> bool {
         self.bounds.contains(point)
     }
-
     fn intersects_rect(&self, other: Rect) -> bool {
-        self.bounds.intersect(other).is_some()
+        let intersection = self.bounds.intersect(other);
+        intersection.width() > 0.0 && intersection.height() > 0.0
     }
 }
 
@@ -390,13 +390,24 @@ fn handle_platforming_input(
     // Climbing
     if keyboard_input.pressed(KeyCode::KeyW) || keyboard_input.pressed(KeyCode::ArrowUp) {
         input.move_y = 1.0;
-
-        // Try to enter climbing state
+        // for obj in &world.0.objects {
+        //     if obj.object_type.is_climbable() && obj.contains_point(world.0.player.position) {
+        //         world.0.player.try_enter_climbing(obj.position.x);
+        //         break;
+        //     }
+        // }
+        let player_position = world.0.player.position; // Save position to avoid borrow conflict
+        let mut should_climb = false;
+        let mut climb_x = 0.0;
         for obj in &world.0.objects {
-            if obj.object_type.is_climbable() && obj.contains_point(world.0.player.position) {
-                world.0.player.try_enter_climbing(obj.position.x);
+            if obj.object_type.is_climbable() && obj.contains_point(player_position) {
+                should_climb = true;
+                climb_x = obj.position.x;
                 break;
             }
+        }
+        if should_climb {
+            world.0.player.try_enter_climbing(climb_x);
         }
     } else if keyboard_input.pressed(KeyCode::KeyS) || keyboard_input.pressed(KeyCode::ArrowDown) {
         input.move_y = -1.0;
@@ -461,18 +472,7 @@ fn render_platforming_world(
             transform: Transform::from_xyz(world.0.player.position.x, world.0.player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                format!("HP: {:.0}", world.0.player.health),
-                TextStyle {
-                    font_size: 12.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 15.0, 2.0),
-            ..default()
-        },
+
     )).id();
     *player_entity = Some(entity);
 }

@@ -396,18 +396,7 @@ fn render_shooting_game(
             transform: Transform::from_xyz(game.0.player.position.x, game.0.player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                format!("HP: {:.0}/{:.0}", game.0.player.health, game.0.player.max_health),
-                TextStyle {
-                    font_size: 12.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 20.0, 2.0),
-            ..default()
-        },
+
     )).id();
     *player_entity = Some(entity);
 
@@ -426,17 +415,7 @@ fn render_shooting_game(
                 transform: Transform::from_xyz(target.position.x, target.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{:.0}", target.health),
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         target_entities.push(entity);
     }
@@ -489,7 +468,7 @@ fn handle_shooting_input(
         if let Ok((camera, camera_transform)) = camera_query.get_single() {
             if let Some(window) = windows.iter().next() {
                 if let Some(cursor_pos) = window.cursor_position() {
-                    if let Ok(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
                         let target_pos = world_pos.origin.truncate();
                         let direction = (target_pos - game.0.player.position).normalize();
                         game.0.player_shoot(direction, time.elapsed_seconds_f64());

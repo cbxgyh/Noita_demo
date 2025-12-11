@@ -471,18 +471,7 @@ fn render_rollback_demo(
                 transform: Transform::from_xyz(player.position.x, player.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("P{}: {:.0} HP", i + 1, player.health),
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 20.0, 2.0),
-                ..default()
-            },
+
         )).id();
         player_entities.push(entity);
     }

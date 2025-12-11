@@ -520,18 +520,7 @@ fn render_fluid_spray_demo(
                 transform: Transform::from_xyz(sprayer.position.x, sprayer.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{}: {}", i + 1, if sprayer.is_active { "ON" } else { "OFF" }),
-                    TextStyle {
-                        font_size: 10.0,
-                        color: status_color,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, -15.0, 2.0),
-                ..default()
-            },
+            T
         )).id();
         sprayer_entities.push(entity);
     }

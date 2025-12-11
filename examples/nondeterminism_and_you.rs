@@ -420,17 +420,7 @@ fn render_nondeterminism_demo(
                 transform: Transform::from_xyz(particle.position.x - 200.0, particle.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{}", particle.id),
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         particle_entities.push(entity);
     }
@@ -453,17 +443,7 @@ fn render_nondeterminism_demo(
                 transform: Transform::from_xyz(particle.position.x + 200.0, particle.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{}", particle.id),
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         particle_entities.push(entity);
     }

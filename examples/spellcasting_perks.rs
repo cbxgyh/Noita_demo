@@ -433,18 +433,7 @@ fn render_spellcasting_demo(
             transform: Transform::from_xyz(demo.player.position.x, demo.player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                format!("MP: {:.0}/{:.0}", demo.player.mana, demo.player.max_mana),
-                TextStyle {
-                    font_size: 10.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 25.0, 2.0),
-            ..default()
-        },
+
     )).id();
     *player_entity = Some(player_render);
 
@@ -461,17 +450,7 @@ fn render_spellcasting_demo(
                 transform: Transform::from_xyz(position.x + 50.0 + i as f32 * 30.0, position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    &spell.name,
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         spell_entities.push(spell_entity);
     }
@@ -495,17 +474,7 @@ fn render_spellcasting_demo(
                 transform: Transform::from_xyz(position.x, position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    perk_type.name(),
-                    TextStyle {
-                        font_size: 8.0,
-                        color: Color::BLACK,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         ui_entities.push(perk_entity);
     }
@@ -522,17 +491,7 @@ fn render_spellcasting_demo(
                 transform: Transform::from_xyz(400.0 + i as f32 * 30.0, 50.0, 2.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("Lv.{}", perk.level),
-                    TextStyle {
-                        font_size: 6.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         ui_entities.push(selected_entity);
     }
@@ -549,17 +508,7 @@ fn render_spellcasting_demo(
                 transform: Transform::from_xyz(800.0, 600.0 - i as f32 * 50.0, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    &spell.name,
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                ..default()
-            },
+
         )).id();
         ui_entities.push(spell_ui_entity);
     }

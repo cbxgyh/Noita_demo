@@ -459,9 +459,10 @@ fn handle_sound_input(
     if keyboard_input.just_pressed(KeyCode::Space) {
         // Avoid double borrow by inlining jump logic
         if demo.player.on_ground {
+            let player_position = demo.player.position; // Save position before mutable borrow
             demo.player.velocity.y = 200.0;
             demo.player.on_ground = false;
-            demo.audio_engine.play_sound("jump", demo.player.position);
+            demo.audio_engine.play_sound("jump", player_position);
         }
     }
 

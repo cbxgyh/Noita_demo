@@ -599,18 +599,7 @@ fn render_timing_demo(
                 transform: Transform::from_xyz(entity.position.x, entity.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    format!("{}: {:.0} HP", entity.name, entity.health),
-                    TextStyle {
-                        font_size: 12.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 25.0, 2.0),
-                ..default()
-            },
+
         )).id();
         entity_entities.push(entity_bundle);
     }

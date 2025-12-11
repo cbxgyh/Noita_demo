@@ -312,7 +312,7 @@ impl FundingGame {
         self.player.velocity.x = input.move_x * 120.0;
         self.player.velocity.y -= 300.0 * dt;
 
-        let new_position = self.player.position + self.player.velocity * dt;
+        let mut new_position = self.player.position + self.player.velocity * dt;
 
         // Simple ground collision
         if new_position.y <= 50.0 {
@@ -337,7 +337,8 @@ impl FundingGame {
         for crate_ in &mut self.loot_crates {
             if !crate_.is_open {
                 let crate_rect = Rect::from_center_size(crate_.position, crate_.size);
-                if player_rect.intersect(crate_rect).is_some() && input.interact {
+                let intersection = player_rect.intersect(crate_rect);
+                if intersection.width() > 0.0 && intersection.height() > 0.0 && input.interact {
                     crate_.open();
                     self.player.add_experience(10);
                     println!("🎁 Opened loot crate!");
@@ -506,18 +507,7 @@ fn render_funding_game(
             transform: Transform::from_xyz(game.0.player.position.x, game.0.player.position.y, 1.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                format!("Lv.{} ${}", game.0.player.level, game.0.player.currency),
-                TextStyle {
-                    font_size: 12.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 20.0, 2.0),
-            ..default()
-        },
+
     )).id();
     *player_entity = Some(entity);
 
@@ -537,18 +527,6 @@ fn render_funding_game(
                     ..default()
                 },
                 transform: Transform::from_xyz(position.x, position.y, 1.0),
-                ..default()
-            },
-            Text2dBundle {
-                text: Text::from_section(
-                    item_name,
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 0.0, 2.0),
                 ..default()
             },
         )).id();

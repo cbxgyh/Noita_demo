@@ -2,6 +2,7 @@
 // Based on "Networked Multiplayer on the Web" blog post
 // https://www.slowrush.dev/news/networked-multiplayer-on-the-web
 
+use std::collections::VecDeque;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 
@@ -143,7 +144,7 @@ impl WebNetworkManager {
     }
 
     fn connect_to_room(&mut self, room_id: String) {
-        self.game_room_id = room_id;
+        self.game_room_id = room_id.clone();
 
         match self.transport_type {
             WebTransportType::WebRTC => {
@@ -435,7 +436,7 @@ impl WebMultiplayerDemo {
     }
 
     fn update(&mut self, dt: f32) {
-        self.current_time += dt;
+        self.current_time += dt as f64;
 
         // Update local player physics
         self.local_player.velocity.y -= 300.0 * dt;
@@ -460,7 +461,7 @@ impl WebMultiplayerDemo {
         }
 
         // Update network manager
-        self.network_manager.update(self.current_time, dt);
+        self.network_manager.update(self.current_time, dt as f64);
 
         // Process received messages
         let received_messages = self.network_manager.received_messages.clone();
@@ -483,7 +484,7 @@ impl WebMultiplayerDemo {
                         remote_player.last_update = self.current_time;
                     } else {
                         let new_player = PlayerState::new(
-                            player_id,
+                            player_id.clone(),
                             format!("Remote Player {}", self.remote_players.len() + 1),
                             position,
                         );
@@ -646,18 +647,7 @@ fn render_web_multiplayer_demo(
                 transform: Transform::from_xyz(remote_player.position.x, remote_player.position.y, 1.0),
                 ..default()
             },
-            Text2dBundle {
-                text: Text::from_section(
-                    &remote_player.name,
-                    TextStyle {
-                        font_size: 10.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_xyz(0.0, 18.0, 2.0),
-                ..default()
-            },
+
         )).id();
         player_entities.push(remote_entity);
     }
@@ -674,18 +664,7 @@ fn render_web_multiplayer_demo(
             transform: Transform::from_xyz(700.0, 550.0, 2.0),
             ..default()
         },
-        Text2dBundle {
-            text: Text::from_section(
-                quality.description(),
-                TextStyle {
-                    font_size: 12.0,
-                    color: Color::WHITE,
-                    ..default()
-                },
-            ),
-            transform: Transform::from_xyz(0.0, -25.0, 3.0),
-            ..default()
-        },
+
     )).id();
     player_entities.push(status_entity);
 

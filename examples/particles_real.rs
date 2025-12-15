@@ -28,25 +28,67 @@ enum AtomType {
     Sand,
     Water,
     Stone,
+    Oil,
+    Lava,
+    Acid,
+    Steam,
+    Smoke,
 }
 
 impl AtomType {
     fn mass(&self) -> f32 {
         match self {
             AtomType::Empty => 0.0,
-            AtomType::Sand => 1.6,
+            AtomType::Sand  => 1.6,
             AtomType::Water => 1.0,
             AtomType::Stone => 2.5,
+            AtomType::Oil   => 0.8,
+            AtomType::Lava  => 3.0,
+            AtomType::Acid  => 1.2,
+            AtomType::Steam => 0.1,
+            AtomType::Smoke => 0.05,
         }
     }
 
     fn color(&self) -> Color {
         match self {
             AtomType::Empty => Color::rgba(0.0, 0.0, 0.0, 0.0),
-            AtomType::Sand => Color::rgb(0.8, 0.7, 0.5),
+            AtomType::Sand  => Color::rgb(0.8, 0.7, 0.5),
             AtomType::Water => Color::rgba(0.2, 0.4, 0.8, 0.8),
             AtomType::Stone => Color::rgb(0.4, 0.4, 0.4),
+            AtomType::Oil   => Color::rgba(0.15, 0.1, 0.05, 0.95),
+            AtomType::Lava  => Color::rgba(1.0, 0.4, 0.1, 0.95),
+            AtomType::Acid  => Color::rgba(0.3, 0.9, 0.2, 0.9),
+            AtomType::Steam => Color::rgba(0.9, 0.9, 0.9, 0.5),
+            AtomType::Smoke => Color::rgba(0.3, 0.3, 0.3, 0.5),
         }
+    }
+
+    /// Conceptual density used for settling/swapping logic (like sandspiel)
+    fn density(&self) -> f32 {
+        match self {
+            AtomType::Empty => 0.0,
+            AtomType::Smoke => 0.05,
+            AtomType::Steam => 0.1,
+            AtomType::Oil   => 0.8,
+            AtomType::Water => 1.0,
+            AtomType::Acid  => 1.3,
+            AtomType::Sand  => 2.0,
+            AtomType::Stone => 5.0,
+            AtomType::Lava  => 6.0,
+        }
+    }
+
+    fn is_solid(&self) -> bool {
+        matches!(self, AtomType::Sand | AtomType::Stone)
+    }
+
+    fn is_liquid(&self) -> bool {
+        matches!(self, AtomType::Water | AtomType::Oil | AtomType::Lava | AtomType::Acid)
+    }
+
+    fn is_gas(&self) -> bool {
+        matches!(self, AtomType::Steam | AtomType::Smoke)
     }
 }
 
@@ -163,10 +205,16 @@ impl ParticleWorld {
         // Step 4: Update atoms (with optimized collision detection)
         self.update_atoms(dt);
 
-        // Step 5: Handle particle interactions (optimized with spatial partitioning)
+        // Step 5: Let sand settle like real piles (grid-based settle pass)
+        self.settle_sand();
+
+        // Step 6: Let liquids (water / oil) flow and spread
+        self.settle_liquids();
+
+        // Step 7: Handle particle interactions (optimized with spatial partitioning)
         self.handle_particle_interactions_optimized(dt);
 
-        // Step 6: Clean up expired particles (batch processing)
+        // Step 8: Clean up expired particles (batch processing)
         self.cleanup_particles_batch();
     }
 
@@ -224,6 +272,244 @@ impl ParticleWorld {
             // Update lifetime for particles
             if let Some(ref mut lifetime) = atom.lifetime {
                 *lifetime -= dt;
+            }
+        }
+    }
+
+    /// Make sand behave like a pile: fall straight down, then diagonally, and swap with water
+    fn settle_sand(&mut self) {
+        let mut moved = vec![false; self.width * self.height];
+
+        // Iterate top-down to avoid moving the same grain multiple times per frame
+        for y in (0..self.height).rev() {
+            for x in 0..self.width {
+                let idx = y * self.width + x;
+                if moved[idx] {
+                    continue;
+                }
+
+                let atom_type = self.atoms[idx].atom_type.clone();
+                if atom_type != AtomType::Sand || self.atoms[idx].is_particle {
+                    continue;
+                }
+
+                // Target positions
+                let below = if y > 0 { Some((x, y - 1)) } else { None };
+
+                if let Some((bx, by)) = below {
+                    let below_idx = by * self.width + bx;
+                    let below_type = self.atoms[below_idx].atom_type.clone();
+                    match below_type {
+                        AtomType::Empty | AtomType::Steam => {
+                            // Move sand straight down
+                            let target_idx = below_idx;
+                            let sand_atom = ParticleAtom::new(
+                                AtomType::Sand,
+                                Vec2::new(bx as f32, by as f32),
+                            );
+                            self.atoms[target_idx] = sand_atom;
+                            self.atoms[idx] = ParticleAtom::new(
+                                AtomType::Empty,
+                                Vec2::new(x as f32, y as f32),
+                            );
+                            moved[target_idx] = true;
+                            moved[idx] = true;
+                            continue;
+                        }
+                        _ if below_type.is_liquid() && below_type.density() < atom_type.density() => {
+                            // Sand sinks through lighter liquid (water, oil) by swapping
+                            let target_idx = below_idx;
+                            self.atoms.swap(idx, target_idx);
+                            // Update positions after swap
+                            self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                            self.atoms[target_idx].position =
+                                Vec2::new(bx as f32, by as f32);
+                            moved[target_idx] = true;
+                            moved[idx] = true;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Try diagonals if straight down blocked
+                let try_diag = |dx: isize, x: usize, y: usize, width: usize, height: usize| -> Option<(usize, usize)> {
+                    let nx = x as isize + dx;
+                    let ny = y as isize - 1; // downwards
+                    if nx >= 0 && (nx as usize) < width && ny >= 0 {
+                        Some((nx as usize, ny as usize))
+                    } else {
+                        None
+                    }
+                };
+
+                // Randomize left/right to avoid bias
+                let left_first = rand::random::<bool>();
+                let diag_candidates = if left_first { [ -1, 1 ] } else { [ 1, -1 ] };
+
+                let mut moved_diag = false;
+                for dx in diag_candidates {
+                    if let Some((nx, ny)) = try_diag(dx, x, y, self.width, self.height) {
+                        let nidx = ny * self.width + nx;
+                        let n_type = self.atoms[nidx].atom_type.clone();
+                        match n_type {
+                            AtomType::Empty | AtomType::Steam => {
+                                // Move sand diagonally
+                                let target_idx = nidx;
+                                let sand_atom = ParticleAtom::new(
+                                    AtomType::Sand,
+                                    Vec2::new(nx as f32, ny as f32),
+                                );
+                                self.atoms[target_idx] = sand_atom;
+                                self.atoms[idx] = ParticleAtom::new(
+                                    AtomType::Empty,
+                                    Vec2::new(x as f32, y as f32),
+                                );
+                                moved[target_idx] = true;
+                                moved[idx] = true;
+                                moved_diag = true;
+                                break;
+                            }
+                            _ if n_type.is_liquid() && n_type.density() < atom_type.density() => {
+                                // Swap with lighter liquid diagonally
+                                let target_idx = nidx;
+                                self.atoms.swap(idx, target_idx);
+                                self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                                self.atoms[target_idx].position =
+                                    Vec2::new(nx as f32, ny as f32);
+                                moved[target_idx] = true;
+                                moved[idx] = true;
+                                moved_diag = true;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                if moved_diag {
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Make liquids (water / oil) behave more like sandspiel style fluids:
+    /// fall down, then diagonally, then spread sideways, using simple CA rules.
+    fn settle_liquids(&mut self) {
+        let mut moved = vec![false; self.width * self.height];
+
+        // Iterate bottom-up so liquids prefer to fall into newly emptied cells
+        for y in (0..self.height).rev() {
+            for x in 0..self.width {
+                let idx = y * self.width + x;
+                if moved[idx] {
+                    continue;
+                }
+
+                let atom_type = self.atoms[idx].atom_type.clone();
+                if !atom_type.is_liquid() || self.atoms[idx].is_particle {
+                    continue;
+                }
+
+                // Try move straight down
+                if y > 0 {
+                    let by = y - 1;
+                    let bidx = by * self.width + x;
+                    let below_type = self.atoms[bidx].atom_type.clone();
+
+                    // Liquids fall through empty or gas
+                    if matches!(below_type, AtomType::Empty | AtomType::Steam) {
+                        self.atoms.swap(idx, bidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[bidx].position = Vec2::new(x as f32, by as f32);
+                        moved[bidx] = true;
+                        moved[idx] = true;
+                        continue;
+                    }
+
+                    // If below is another liquid that is heavier, we can swap (e.g. oil floating on water)
+                    if below_type.is_liquid() && below_type.density() > atom_type.density() {
+                        self.atoms.swap(idx, bidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[bidx].position = Vec2::new(x as f32, by as f32);
+                        moved[bidx] = true;
+                        moved[idx] = true;
+                        continue;
+                    }
+                }
+
+                // Try diagonals down-left / down-right
+                let left_first = rand::random::<bool>();
+                let diag_candidates = if left_first { [ -1, 1 ] } else { [ 1, -1 ] };
+
+                let mut moved_diag = false;
+                for dx in diag_candidates {
+                    let nx = x as isize + dx;
+                    let ny = y as isize - 1;
+                    if nx < 0 || ny < 0 {
+                        continue;
+                    }
+                    let nxu = nx as usize;
+                    let nyu = ny as usize;
+                    if nxu >= self.width || nyu >= self.height {
+                        continue;
+                    }
+
+                    let nidx = nyu * self.width + nxu;
+                    let n_type = self.atoms[nidx].atom_type.clone();
+
+                    if matches!(n_type, AtomType::Empty | AtomType::Steam) {
+                        self.atoms.swap(idx, nidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[nidx].position = Vec2::new(nxu as f32, nyu as f32);
+                        moved[nidx] = true;
+                        moved[idx] = true;
+                        moved_diag = true;
+                        break;
+                    }
+
+                    if n_type.is_liquid() && n_type.density() > atom_type.density() {
+                        self.atoms.swap(idx, nidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[nidx].position = Vec2::new(nxu as f32, nyu as f32);
+                        moved[nidx] = true;
+                        moved[idx] = true;
+                        moved_diag = true;
+                        break;
+                    }
+                }
+
+                if moved_diag {
+                    continue;
+                }
+
+                // If can't go down, spread sideways (gives that sandspiel-like smooth water flow)
+                let side_first = rand::random::<bool>();
+                let side_candidates = if side_first { [ -1, 1 ] } else { [ 1, -1 ] };
+
+                for dx in side_candidates {
+                    let nx = x as isize + dx;
+                    if nx < 0 {
+                        continue;
+                    }
+                    let nxu = nx as usize;
+                    if nxu >= self.width {
+                        continue;
+                    }
+
+                    let nidx = y * self.width + nxu;
+                    let n_type = self.atoms[nidx].atom_type.clone();
+
+                    if matches!(n_type, AtomType::Empty | AtomType::Steam) {
+                        self.atoms.swap(idx, nidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[nidx].position = Vec2::new(nxu as f32, y as f32);
+                        moved[nidx] = true;
+                        moved[idx] = true;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -545,6 +831,28 @@ fn create_particle_demo_setup(world: &mut ParticleWorld) {
         }
     }
 
+    // Create a small lava pool
+    let lava_start_x = world.width / 10;
+    let lava_end_x = lava_start_x + world.width / 15;
+    let lava_start_y = world.height / 2;
+    let lava_end_y = lava_start_y + world.height / 30;
+    for x in lava_start_x..lava_end_x.min(world.width) {
+        for y in lava_start_y..lava_end_y.min(world.height) {
+            world.set_atom(x, y, ParticleAtom::new(AtomType::Lava, Vec2::new(x as f32, y as f32)));
+        }
+    }
+
+    // Create a small acid pool
+    let acid_start_x = world.width * 7 / 10;
+    let acid_end_x = acid_start_x + world.width / 15;
+    let acid_start_y = world.height / 2;
+    let acid_end_y = acid_start_y + world.height / 30;
+    for x in acid_start_x..acid_end_x.min(world.width) {
+        for y in acid_start_y..acid_end_y.min(world.height) {
+            world.set_atom(x, y, ParticleAtom::new(AtomType::Acid, Vec2::new(x as f32, y as f32)));
+        }
+    }
+
     // Add moving bodies (positioned relative to world size)
     world.add_moving_body(MovingBody::new(
         Vec2::new(world.width as f32 / 2.0, 20.0),
@@ -583,8 +891,9 @@ fn render_particle_atoms(
     for atom in &world.0.atoms {
         if atom.atom_type != AtomType::Empty {
             let alpha = if atom.is_particle { 0.6 } else { 1.0 };
-            atom.atom_type.color().set_alpha(alpha);
-            let color = atom.atom_type.color();
+            // Ensure the rendered color (including alpha) matches the logical atom type
+            let mut color = atom.atom_type.color();
+            color.set_alpha(alpha);
 
             // Render atoms with increased size for better visibility
             let entity = commands.spawn(SpriteBundle {

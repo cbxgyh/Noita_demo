@@ -208,13 +208,19 @@ impl ParticleWorld {
         // Step 5: Let sand settle like real piles (grid-based settle pass)
         self.settle_sand();
 
-        // Step 6: Let liquids (water / oil) flow and spread
+        // Step 6: Let liquids (water / oil / lava / acid) flow and spread
         self.settle_liquids();
 
-        // Step 7: Handle particle interactions (optimized with spatial partitioning)
+        // Step 7: Let gases (steam / smoke) rise and disperse
+        self.settle_gases();
+
+        // Step 8: Apply simple element reactions (lava+water, acid+solid, etc.)
+        self.apply_reactions();
+
+        // Step 9: Handle particle interactions (optimized with spatial partitioning)
         self.handle_particle_interactions_optimized(dt);
 
-        // Step 8: Clean up expired particles (batch processing)
+        // Step 10: Clean up expired particles (batch processing)
         self.cleanup_particles_batch();
     }
 
@@ -269,7 +275,7 @@ impl ParticleWorld {
                 atom.velocity.y *= -0.5;
             }
 
-            // Update lifetime for particles
+            // Update lifetime for atoms that have it (particles or spawned gases)
             if let Some(ref mut lifetime) = atom.lifetime {
                 *lifetime -= dt;
             }
@@ -511,6 +517,178 @@ impl ParticleWorld {
                     }
                 }
             }
+        }
+    }
+
+    /// Make gases (steam / smoke) rise and spread (reverse of liquids)
+    fn settle_gases(&mut self) {
+        let mut moved = vec![false; self.width * self.height];
+
+        // Iterate bottom-up so gases can rise into yet-to-be-processed cells
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let idx = y * self.width + x;
+                if moved[idx] {
+                    continue;
+                }
+
+                let atom_type = self.atoms[idx].atom_type.clone();
+                if !atom_type.is_gas() || self.atoms[idx].is_particle {
+                    continue;
+                }
+
+                // Try move straight up
+                if y + 1 < self.height {
+                    let uy = y + 1;
+                    let uidx = uy * self.width + x;
+                    let above_type = self.atoms[uidx].atom_type.clone();
+
+                    // Gases rise into empty or lighter gas (lower density)
+                    if matches!(above_type, AtomType::Empty)
+                        || (above_type.is_gas() && above_type.density() > atom_type.density())
+                    {
+                        self.atoms.swap(idx, uidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[uidx].position = Vec2::new(x as f32, uy as f32);
+                        moved[uidx] = true;
+                        moved[idx] = true;
+                        continue;
+                    }
+                }
+
+                // Try diagonals up-left / up-right
+                let left_first = rand::random::<bool>();
+                let diag_candidates = if left_first { [ -1, 1 ] } else { [ 1, -1 ] };
+
+                let mut moved_diag = false;
+                for dx in diag_candidates {
+                    let nx = x as isize + dx;
+                    let ny = y as isize + 1;
+                    if nx < 0 || ny < 0 {
+                        continue;
+                    }
+                    let nxu = nx as usize;
+                    let nyu = ny as usize;
+                    if nxu >= self.width || nyu >= self.height {
+                        continue;
+                    }
+
+                    let nidx = nyu * self.width + nxu;
+                    let n_type = self.atoms[nidx].atom_type.clone();
+
+                    if matches!(n_type, AtomType::Empty)
+                        || (n_type.is_gas() && n_type.density() > atom_type.density())
+                    {
+                        self.atoms.swap(idx, nidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[nidx].position = Vec2::new(nxu as f32, nyu as f32);
+                        moved[nidx] = true;
+                        moved[idx] = true;
+                        moved_diag = true;
+                        break;
+                    }
+                }
+
+                if moved_diag {
+                    continue;
+                }
+
+                // Spread sideways gently if blocked above
+                let side_first = rand::random::<bool>();
+                let side_candidates = if side_first { [ -1, 1 ] } else { [ 1, -1 ] };
+
+                for dx in side_candidates {
+                    let nx = x as isize + dx;
+                    if nx < 0 {
+                        continue;
+                    }
+                    let nxu = nx as usize;
+                    if nxu >= self.width {
+                        continue;
+                    }
+
+                    let nidx = y * self.width + nxu;
+                    let n_type = self.atoms[nidx].atom_type.clone();
+
+                    if matches!(n_type, AtomType::Empty)
+                        || (n_type.is_gas() && n_type.density() > atom_type.density())
+                    {
+                        self.atoms.swap(idx, nidx);
+                        self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                        self.atoms[nidx].position = Vec2::new(nxu as f32, y as f32);
+                        moved[nidx] = true;
+                        moved[idx] = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Simple element reactions inspired by sandspiel
+    /// - Lava + Water -> Stone + Steam
+    /// - Lava + Sand  -> Stone
+    /// - Lava + Oil   -> Lava + Smoke (burn oil)
+    /// - Acid + Sand/Stone -> Acid stays, target removed -> Smoke
+    /// - Acid + Water -> Water (acid neutralized) + Steam
+    fn apply_reactions(&mut self) {
+        let mut to_change: Vec<(usize, AtomType, Option<f32>)> = Vec::new(); // (idx, new type, lifetime)
+
+        let neighbors = [(-1isize, 0isize), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let idx = y * self.width + x;
+                let atom_type = self.atoms[idx].atom_type.clone();
+                if atom_type == AtomType::Empty {
+                    continue;
+                }
+
+                for (dx, dy) in neighbors {
+                    let nx = x as isize + dx;
+                    let ny = y as isize + dy;
+                    if nx < 0 || ny < 0 || nx as usize >= self.width || ny as usize >= self.height {
+                        continue;
+                    }
+                    let nidx = ny as usize * self.width + nx as usize;
+                    let n_type = self.atoms[nidx].atom_type.clone();
+
+                    match atom_type {
+                        AtomType::Lava => {
+                            if n_type == AtomType::Water {
+                                // Lava + Water -> Stone + Steam
+                                to_change.push((idx, AtomType::Stone, None));
+                                to_change.push((nidx, AtomType::Steam, Some(2.0)));
+                            } else if n_type == AtomType::Sand {
+                                // Lava + Sand -> Stone
+                                to_change.push((nidx, AtomType::Stone, None));
+                            } else if n_type == AtomType::Oil {
+                                // Lava burns oil -> Smoke
+                                to_change.push((nidx, AtomType::Smoke, Some(1.5)));
+                            }
+                        }
+                        AtomType::Acid => {
+                            if matches!(n_type, AtomType::Sand | AtomType::Stone) {
+                                // Dissolve solids -> smoke, acid persists
+                                to_change.push((nidx, AtomType::Smoke, Some(1.5)));
+                            } else if n_type == AtomType::Water {
+                                // Neutralize: acid turns to water, produce steam
+                                to_change.push((idx, AtomType::Water, None));
+                                to_change.push((nidx, AtomType::Steam, Some(1.0)));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Apply changes
+        for (idx, new_type, lifetime) in to_change {
+            let pos = self.atoms[idx].position;
+            let mut new_atom = ParticleAtom::new(new_type, pos);
+            new_atom.lifetime = lifetime;
+            self.atoms[idx] = new_atom;
         }
     }
 

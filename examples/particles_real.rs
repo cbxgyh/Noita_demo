@@ -19,6 +19,9 @@ use bevy_rapier2d::prelude::*;
 // Particle system to prevent atoms from crushing moving bodies
 // Demonstrates the solution to the "atoms crushing moving bodies" problem
 
+// Rendering constants for better visibility
+const ATOM_RENDER_SIZE: f32 = 2.0; // Pixels per atom (reduced to show more atoms on screen)
+
 #[derive(Clone, Debug,Eq, PartialEq)]
 enum AtomType {
     Empty,
@@ -251,7 +254,7 @@ impl ParticleWorld {
     fn create_particles_around_position(&mut self, position: Vec2, velocity: Vec2) {
         let particle_distance = 2.0; // Distance from body to create particles
         let particle_lifetime = 0.5; // How long particles last
-        let num_particles = 8; // Number of particles around the body
+        let num_particles = 32; // Number of particles around the body (4x to increase density)
 
         // Only create particles in directions where there's pressure (atoms nearby)
         for i in 0..num_particles {
@@ -470,13 +473,13 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Particles, for real this time - Preventing Crushing".to_string(),
-                resolution: (1000.0, 800.0).into(),
+                resolution: (1600.0, 1200.0).into(),
                 ..default()
             }),
             ..default()
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(32.0))
-        .insert_resource(ParticleWorldResource(ParticleWorld::new(100, 80)))
+        .insert_resource(ParticleWorldResource(ParticleWorld::new(200, 150)))
         .add_systems(Startup, setup_particle_demo)
         .add_systems(Update, (
             update_particle_world,
@@ -498,39 +501,60 @@ fn setup_particle_demo(mut commands: Commands, mut world: ResMut<ParticleWorldRe
 fn create_particle_demo_setup(world: &mut ParticleWorld) {
     // Create stone floor
     for x in 0..world.width {
-        for y in 0..3 {
+        for y in 0..5 {
             world.set_atom(x, y, ParticleAtom::new(AtomType::Stone, Vec2::new(x as f32, y as f32)));
         }
     }
 
-    // Create sand pile that will fall on moving bodies
-    for x in 30..70 {
-        for y in 20..40 {
+    // Create sand pile that will fall on moving bodies (scaled for larger world)
+    let sand_start_x = world.width / 4;
+    let sand_end_x = world.width * 3 / 4;
+    let sand_start_y = world.height / 3;
+    let sand_end_y = world.height / 2;
+    
+    for x in sand_start_x..sand_end_x {
+        for y in sand_start_y..sand_end_y {
             if rand::random::<f32>() < 0.8 {
                 world.set_atom(x, y, ParticleAtom::new(AtomType::Sand, Vec2::new(x as f32, y as f32)));
             }
         }
     }
 
-    // Create water above
-    for x in 40..60 {
-        for y in 50..60 {
-            if rand::random::<f32>() < 0.7 {
-                world.set_atom(x, y, ParticleAtom::new(AtomType::Water, Vec2::new(x as f32, y as f32)));
+    // Create water above (scaled for larger world) as several separated clusters
+    // Cluster layout: rows x cols grid of water blobs with gaps between them
+    let clusters_x = 2;
+    let clusters_y = 2;
+    let cluster_width = world.width / 10;  // width of each blob
+    let cluster_height = world.height / 20; // height of each blob
+    let gap_x = world.width / 20;          // horizontal spacing between blobs
+    let gap_y = world.height / 30;         // vertical spacing between blobs
+
+    let start_x = world.width * 2 / 5;
+    let start_y = world.height * 2 / 3;
+
+    for cx in 0..clusters_x {
+        for cy in 0..clusters_y {
+            let base_x = start_x + cx * (cluster_width + gap_x);
+            let base_y = start_y + cy * (cluster_height + gap_y);
+
+            for x in base_x..(base_x + cluster_width).min(world.width) {
+                for y in base_y..(base_y + cluster_height).min(world.height) {
+                    world.set_atom(x, y, ParticleAtom::new(AtomType::Water, Vec2::new(x as f32, y as f32)));
+                }
             }
         }
     }
 
-    // Add moving bodies
+    // Add moving bodies (positioned relative to world size)
     world.add_moving_body(MovingBody::new(
-        Vec2::new(50.0, 10.0),
+        Vec2::new(world.width as f32 / 2.0, 20.0),
         Vec2::new(20.0, 0.0),
         Vec2::new(4.0, 4.0),
         5.0,
     ));
 
     world.add_moving_body(MovingBody::new(
-        Vec2::new(30.0, 15.0),
+        Vec2::new(world.width as f32 / 3.0, 25.0),
         Vec2::new(-15.0, 0.0),
         Vec2::new(3.0, 3.0),
         3.0,
@@ -562,15 +586,16 @@ fn render_particle_atoms(
             atom.atom_type.color().set_alpha(alpha);
             let color = atom.atom_type.color();
 
+            // Render atoms with increased size for better visibility
             let entity = commands.spawn(SpriteBundle {
                 sprite: Sprite {
                     color,
-                    custom_size: Some(Vec2::new(1.0, 1.0)),
+                    custom_size: Some(Vec2::new(ATOM_RENDER_SIZE, ATOM_RENDER_SIZE)),
                     ..default()
                 },
                 transform: Transform::from_xyz(
-                    atom.position.x - world.0.width as f32 / 2.0,
-                    atom.position.y - world.0.height as f32 / 2.0,
+                    (atom.position.x - world.0.width as f32 / 2.0) * ATOM_RENDER_SIZE,
+                    (atom.position.y - world.0.height as f32 / 2.0) * ATOM_RENDER_SIZE,
                     if atom.is_particle { 1.0 } else { 0.0 }, // Particles render above regular atoms
                 ),
                 ..default()
@@ -590,18 +615,19 @@ fn render_moving_bodies(
         commands.entity(entity).despawn();
     }
 
-    // Render moving bodies
+    // Render moving bodies with same scale as atoms
+    // let atom_size = 8.0; // Match atom rendering size
     for (i, body) in world.0.moving_bodies.iter().enumerate() {
         let entity = commands.spawn((
             SpriteBundle {
                 sprite: Sprite {
                     color: Color::rgb(0.8, 0.3, 0.3),
-                    custom_size: Some(body.size),
+                    custom_size: Some(body.size * ATOM_RENDER_SIZE),
                     ..default()
                 },
                 transform: Transform::from_xyz(
-                    body.position.x - world.0.width as f32 / 2.0,
-                    body.position.y - world.0.height as f32 / 2.0,
+                    (body.position.x - world.0.width as f32 / 2.0) * ATOM_RENDER_SIZE,
+                    (body.position.y - world.0.height as f32 / 2.0) * ATOM_RENDER_SIZE,
                     2.0, // Render above atoms
                 ),
                 ..default()
@@ -622,8 +648,9 @@ fn handle_particle_interaction(
         if let Some(window) = windows.iter().next() {
             if let Some(cursor_pos) = window.cursor_position() {
                 if let Some(world_pos) = camera.viewport_to_world(camera_transform, cursor_pos) {
-                    let atom_x = (world_pos.origin.x + world.0.width as f32 / 2.0) as usize;
-                    let atom_y = (world_pos.origin.y + world.0.height as f32 / 2.0) as usize;
+                    // Account for atom size scaling (8.0 pixels per atom)
+                    let atom_x = ((world_pos.origin.x / ATOM_RENDER_SIZE) + world.0.width as f32 / 2.0) as usize;
+                    let atom_y = ((world_pos.origin.y / ATOM_RENDER_SIZE) + world.0.height as f32 / 2.0) as usize;
 
                     if mouse_input.just_pressed(MouseButton::Left) {
                         // Add sand at cursor
@@ -655,9 +682,11 @@ fn demonstrate_particle_system(
     mut world: ResMut<ParticleWorldResource>,
 ) {
     if keyboard_input.just_pressed(KeyCode::KeyA) {
-        // Add another moving body
+        // Add another moving body (positioned relative to world size)
+        let width= world.0.width as f32 * 0.6;
+        let height= world.0.height as f32 * 0.3;
         world.0.add_moving_body(MovingBody::new(
-            Vec2::new(80.0, 30.0),
+            Vec2::new(width, height),
             Vec2::new(-25.0, 10.0),
             Vec2::new(3.0, 3.0),
             2.0,
@@ -665,8 +694,10 @@ fn demonstrate_particle_system(
     }
 
     if keyboard_input.just_pressed(KeyCode::KeyR) {
-        // Reset simulation
-        *world = ParticleWorldResource(ParticleWorld::new(100, 80));
+        // Reset simulation (use current world size)
+        let width = world.0.width;
+        let height = world.0.height;
+        *world = ParticleWorldResource(ParticleWorld::new(width, height));
         create_particle_demo_setup(&mut world.0);
     }
 

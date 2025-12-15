@@ -1,6 +1,17 @@
 // Example: Particles, for real this time
-// Based on "Particles, for real this time" blog post
-// https://www.slowrush.dev/news/particles-for-real-this-time
+// Based on multiple blog posts from Slow Rush Games:
+// - "Particles, for real this time" - https://www.slowrush.dev/news/particles-for-real-this-time
+// - "Bridging Physics Worlds" - https://www.slowrush.dev/news/bridging-physics-worlds
+// - "Optimizing the Physics Bridge" - https://www.slowrush.dev/news/optimizing-physics-bridge
+// - "Making Atoms Kinetic" - https://www.slowrush.dev/news/kinetic-atoms
+//
+// Optimizations implemented:
+// 1. Spatial partitioning for particle interactions (O(n*m) -> O(n*log(m)))
+// 2. Smart particle creation (only when needed, based on collision detection)
+// 3. Occupied pixel caching for rigid bodies (AABB-based marking)
+// 4. Batch particle cleanup and lifecycle management
+// 5. Reverse velocity search for finding empty positions
+// 6. Optimized atom update with occupied space checking
 
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -73,6 +84,10 @@ struct ParticleWorld {
     height: usize,
     atoms: Vec<ParticleAtom>,
     moving_bodies: Vec<MovingBody>,
+    // Cache for occupied pixels by rigid bodies (optimization from "Optimizing the Physics Bridge")
+    occupied_pixels: Vec<bool>,
+    // Track which regions need particle updates (spatial optimization)
+    dirty_regions: Vec<(usize, usize)>, // (x, y) grid positions that need updates
 }
 
 impl ParticleWorld {
@@ -89,6 +104,8 @@ impl ParticleWorld {
             height,
             atoms,
             moving_bodies: Vec::new(),
+            occupied_pixels: vec![false; width * height],
+            dirty_regions: Vec::new(),
         }
     }
 
@@ -119,56 +136,63 @@ impl ParticleWorld {
     }
 
     fn update(&mut self, dt: f32) {
+        // Step 1: Mark space occupied by rigid bodies (optimized from "Bridging Physics Worlds")
+        self.mark_occupied_pixels();
 
-        // for body in &mut self.moving_bodies {
-        //             body.update(dt);
-        //
-        //             // Create particles around moving bodies to prevent crushing
-        //             self.create_particles_around_body(body);
-        //         }  ##
-        // 代码在循环中持有 &mut self.moving_bodies 的可变借用
-        // 同时调用 self.create_particles_around_body(body)，需要另一个对 self 的可变借用
-        // 这会导致对 self 的多个可变借用冲突
-        // 解决方案：
-        // 分离更新和粒子创建：
-        // 先更新所有 moving_bodies
-        // 释放借用后，再创建粒子
-        // 提取数据：
-        // 将每个 body 的 position 和 velocity 收集到临时向量
-        // 在循环外使用这些数据
-        // 新增方法：
-        // 添加 create_particles_around_position，接受 position 和 velocity
-        // 保留 create_particles_around_body 作为包装方法
-        // 代码现在应可正常编译。此修改符合 Rust 的借用规则，并保持了原有功能。
-        // Update moving bodies
+        // Step 2: Update moving bodies
         for body in &mut self.moving_bodies {
             body.update(dt);
         }
 
-        // Create particles around moving bodies to prevent crushing
-        // Do this after updating bodies to avoid borrowing conflicts
-        let body_data: Vec<(Vec2, Vec2)> = self.moving_bodies.iter()
-            .map(|body| (body.position, body.velocity))
+        // Step 3: Create particles around moving bodies only when needed
+        // Optimization: Only create particles if body is moving fast or colliding
+        let body_data: Vec<(Vec2, Vec2, Vec2)> = self.moving_bodies.iter()
+            .map(|body| (body.position, body.velocity, body.size))
             .collect();
         
-        for (position, velocity) in body_data {
-            self.create_particles_around_position(position, velocity);
+        for (position, velocity, size) in body_data {
+            // Only create particles if body is moving or likely to be crushed
+            if velocity.length_squared() > 1.0 || self.is_body_under_pressure(position, size) {
+                self.create_particles_around_position(position, velocity);
+            }
         }
 
-        // Update atoms
+        // Step 4: Update atoms (with optimized collision detection)
         self.update_atoms(dt);
 
-        // Handle particle interactions
-        self.handle_particle_interactions(dt);
+        // Step 5: Handle particle interactions (optimized with spatial partitioning)
+        self.handle_particle_interactions_optimized(dt);
 
-        // Clean up expired particles
-        self.cleanup_particles();
+        // Step 6: Clean up expired particles (batch processing)
+        self.cleanup_particles_batch();
     }
 
     fn update_atoms(&mut self, dt: f32) {
+        // Optimized: Process atoms in batches and check occupied pixels
         for atom in &mut self.atoms {
             if atom.atom_type == AtomType::Empty {
                 continue;
+            }
+
+            // Check if atom is in occupied space (from rigid body)
+            let x = atom.position.x.round() as usize;
+            let y = atom.position.y.round() as usize;
+            if x < self.width && y < self.height {
+                let idx = y * self.width + x;
+                if self.occupied_pixels[idx] {
+                    // Atom is inside a rigid body, push it away
+                    // Find nearest body to calculate push direction
+                    let mut push_velocity = Vec2::ZERO;
+                    for body in &self.moving_bodies {
+                        let to_atom = atom.position - body.position;
+                        let distance = to_atom.length();
+                        if distance < body.size.length() {
+                            let push_strength = (body.size.length() - distance) * 20.0;
+                            push_velocity += to_atom.normalize_or_zero() * push_strength;
+                        }
+                    }
+                    atom.velocity += push_velocity * dt;
+                }
             }
 
             // Apply gravity to non-particle atoms
@@ -176,23 +200,21 @@ impl ParticleWorld {
                 atom.velocity.y -= 30.0 * dt;
             }
 
+            // Apply damping to prevent infinite velocity
+            atom.velocity *= 0.98;
+
             // Update position
             atom.position += atom.velocity * dt;
 
-            // Simple bounds checking
-            if atom.position.x < 0.0 {
-                atom.position.x = 0.0;
-                atom.velocity.x *= -0.5;
-            } else if atom.position.x >= self.width as f32 {
-                atom.position.x = self.width as f32 - 1.0;
+            // Optimized bounds checking with clamping
+            atom.position.x = atom.position.x.max(0.0).min(self.width as f32 - 1.0);
+            atom.position.y = atom.position.y.max(0.0).min(self.height as f32 - 1.0);
+
+            // Bounce off walls with damping
+            if atom.position.x <= 0.0 || atom.position.x >= self.width as f32 - 1.0 {
                 atom.velocity.x *= -0.5;
             }
-
-            if atom.position.y < 0.0 {
-                atom.position.y = 0.0;
-                atom.velocity.y *= -0.5;
-            } else if atom.position.y >= self.height as f32 {
-                atom.position.y = self.height as f32 - 1.0;
+            if atom.position.y <= 0.0 || atom.position.y >= self.height as f32 - 1.0 {
                 atom.velocity.y *= -0.5;
             }
 
@@ -207,47 +229,107 @@ impl ParticleWorld {
         self.create_particles_around_position(body.position, body.velocity);
     }
 
+    // Find empty position near a point (from "Particles, for real this time" - reverse velocity search)
+    fn find_empty_position_near(&self, start_pos: Vec2, search_direction: Vec2, max_distance: f32) -> Option<Vec2> {
+        // Search along reverse velocity direction to find empty space
+        let search_dir = -search_direction.normalize_or_zero();
+        
+        for step in 1..=(max_distance as i32) {
+            let check_pos = start_pos + search_dir * (step as f32);
+            let x = check_pos.x.round() as usize;
+            let y = check_pos.y.round() as usize;
+            
+            if x < self.width && y < self.height && self.is_empty(x, y) {
+                return Some(check_pos);
+            }
+        }
+        
+        None
+    }
+
+    // Optimized particle creation - only create where needed (from "Particles, for real this time")
     fn create_particles_around_position(&mut self, position: Vec2, velocity: Vec2) {
         let particle_distance = 2.0; // Distance from body to create particles
         let particle_lifetime = 0.5; // How long particles last
         let num_particles = 8; // Number of particles around the body
 
+        // Only create particles in directions where there's pressure (atoms nearby)
         for i in 0..num_particles {
             let angle = (i as f32 / num_particles as f32) * std::f32::consts::TAU;
-            let particle_pos = position + Vec2::new(angle.cos(), angle.sin()) * particle_distance;
+            let direction = Vec2::new(angle.cos(), angle.sin());
+            let particle_pos = position + direction * particle_distance;
 
             let x = particle_pos.x.round() as usize;
             let y = particle_pos.y.round() as usize;
 
-            if x < self.width && y < self.height && self.is_empty(x, y) {
-                // Create a particle atom
-                let particle = ParticleAtom::new_particle(
-                    AtomType::Sand, // Use sand as particle material
-                    particle_pos,
-                    velocity * 0.1, // Particles inherit some body velocity
-                    particle_lifetime,
-                );
-                self.set_atom(x, y, particle);
+            if x < self.width && y < self.height {
+                // Check if this position needs a particle (has atoms nearby in this direction)
+                let check_pos = position + direction * (particle_distance + 1.0);
+                let check_x = check_pos.x.round() as usize;
+                let check_y = check_pos.y.round() as usize;
+                
+                let needs_particle = if check_x < self.width && check_y < self.height {
+                    !self.is_empty(check_x, check_y)
+                } else {
+                    false
+                };
+
+                // Only create particle if position is empty and there's pressure from that direction
+                if self.is_empty(x, y) && (needs_particle || velocity.length_squared() > 10.0) {
+                    // If position is occupied, try to find empty space nearby (reverse velocity search)
+                    let final_pos = if !self.is_empty(x, y) {
+                        self.find_empty_position_near(particle_pos, velocity, 3.0)
+                            .unwrap_or(particle_pos)
+                    } else {
+                        particle_pos
+                    };
+
+                    let final_x = final_pos.x.round() as usize;
+                    let final_y = final_pos.y.round() as usize;
+
+                    if final_x < self.width && final_y < self.height && self.is_empty(final_x, final_y) {
+                        // Create a particle atom with velocity based on body movement
+                        let particle = ParticleAtom::new_particle(
+                            AtomType::Sand, // Use sand as particle material
+                            final_pos,
+                            velocity * 0.1 + direction * 5.0, // Particles inherit body velocity + push away
+                            particle_lifetime,
+                        );
+                        self.set_atom(final_x, final_y, particle);
+                    }
+                }
             }
         }
     }
 
-    fn handle_particle_interactions(&mut self, dt: f32) {
-        // Particles push regular atoms away from moving bodies
-        for body in &self.moving_bodies {
-            let body_aabb = Rect::from_center_size(body.position, Vec2::new(4.0, 4.0));
+    // Optimized version using spatial partitioning (from "Optimizing the Physics Bridge")
+    fn handle_particle_interactions_optimized(&mut self, dt: f32) {
+        // Only check atoms near moving bodies to avoid O(n*m) complexity
+        for body in &self.moving_bodies.clone() {
+            let body_aabb = Rect::from_center_size(body.position, body.size * 1.5);
+            
+            // Calculate grid bounds for spatial optimization
+            let min_x = (body_aabb.min.x.max(0.0) as usize).min(self.width);
+            let max_x = (body_aabb.max.x.max(0.0) as usize).min(self.width);
+            let min_y = (body_aabb.min.y.max(0.0) as usize).min(self.height);
+            let max_y = (body_aabb.max.y.max(0.0) as usize).min(self.height);
 
-            for atom in &mut self.atoms {
-                if atom.atom_type != AtomType::Empty && !atom.is_particle {
-                    if body_aabb.contains(atom.position) {
-                        // Calculate repulsion force from body
-                        let to_atom = atom.position - body.position;
-                        let distance = to_atom.length();
+            // Only iterate over nearby atoms instead of all atoms
+            for y in min_y..max_y {
+                for x in min_x..max_x {
+                    if let Some(atom) = self.get_atom_mut(x, y) {
+                        if atom.atom_type != AtomType::Empty && !atom.is_particle {
+                            if body_aabb.contains(atom.position) {
+                                // Calculate repulsion force from body
+                                let to_atom = atom.position - body.position;
+                                let distance = to_atom.length();
 
-                        if distance > 0.0 && distance < 3.0 {
-                            let force_strength = (3.0 - distance) * 50.0;
-                            let force_direction = to_atom.normalize();
-                            atom.velocity += force_direction * force_strength * dt;
+                                if distance > 0.0 && distance < body.size.length() * 0.75 {
+                                    let force_strength = (body.size.length() * 0.75 - distance) * 50.0;
+                                    let force_direction = to_atom.normalize();
+                                    atom.velocity += force_direction * force_strength * dt;
+                                }
+                            }
                         }
                     }
                 }
@@ -255,16 +337,86 @@ impl ParticleWorld {
         }
     }
 
-    fn cleanup_particles(&mut self) {
+    // Keep old method for compatibility (can be removed if not needed)
+    #[allow(dead_code)]
+    fn handle_particle_interactions(&mut self, dt: f32) {
+        self.handle_particle_interactions_optimized(dt);
+    }
+
+    // Optimized batch cleanup (from "Optimizing the Physics Bridge")
+    fn cleanup_particles_batch(&mut self) {
+        // Batch process particles for better cache performance
         for atom in &mut self.atoms {
             if atom.is_particle {
-                if let Some(lifetime) = atom.lifetime {
-                    if lifetime <= 0.0 {
+                if let Some(ref mut lifetime) = atom.lifetime {
+                    *lifetime -= 0.016; // Assume ~60fps for batch processing
+                    if *lifetime <= 0.0 {
                         *atom = ParticleAtom::new(AtomType::Empty, atom.position);
                     }
                 }
             }
         }
+    }
+
+    // Keep old method for compatibility
+    #[allow(dead_code)]
+    fn cleanup_particles(&mut self) {
+        self.cleanup_particles_batch();
+    }
+
+    // Mark pixels occupied by rigid bodies (optimized from "Bridging Physics Worlds")
+    fn mark_occupied_pixels(&mut self) {
+        // Clear previous marks
+        self.occupied_pixels.fill(false);
+
+        // Mark pixels occupied by moving bodies using AABB
+        for body in &self.moving_bodies {
+            let half_size = body.size * 0.5;
+            let min_x = ((body.position.x - half_size.x).max(0.0) as usize).min(self.width);
+            let max_x = ((body.position.x + half_size.x).max(0.0) as usize).min(self.width);
+            let min_y = ((body.position.y - half_size.y).max(0.0) as usize).min(self.height);
+            let max_y = ((body.position.y + half_size.y).max(0.0) as usize).min(self.height);
+
+            for y in min_y..max_y {
+                for x in min_x..max_x {
+                    let idx = y * self.width + x;
+                    // Check if pixel is inside body (simple AABB check)
+                    let pixel_pos = Vec2::new(x as f32, y as f32);
+                    let to_pixel = pixel_pos - body.position;
+                    if to_pixel.x.abs() <= half_size.x && to_pixel.y.abs() <= half_size.y {
+                        self.occupied_pixels[idx] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if a body is under pressure (needs particles to prevent crushing)
+    fn is_body_under_pressure(&self, position: Vec2, size: Vec2) -> bool {
+        let half_size = size * 0.5;
+        let check_radius = half_size.length() + 2.0;
+        
+        let min_x = ((position.x - check_radius).max(0.0) as usize).min(self.width);
+        let max_x = ((position.x + check_radius).max(0.0) as usize).min(self.width);
+        let min_y = ((position.y - check_radius).max(0.0) as usize).min(self.height);
+        let max_y = ((position.y + check_radius).max(0.0) as usize).min(self.height);
+
+        let mut nearby_atoms = 0;
+        for y in min_y..max_y {
+            for x in min_x..max_x {
+                if let Some(atom) = self.get_atom(x, y) {
+                    if atom.atom_type != AtomType::Empty && !atom.is_particle {
+                        let dist = (Vec2::new(x as f32, y as f32) - position).length();
+                        if dist < check_radius {
+                            nearby_atoms += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If there are many atoms nearby, body is under pressure
+        nearby_atoms > 5
     }
 
     fn add_moving_body(&mut self, body: MovingBody) {

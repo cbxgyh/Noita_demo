@@ -221,7 +221,7 @@ impl ParticleWorld {
         self.handle_particle_interactions_optimized(dt);
 
         // Step 10: Clean up expired particles (batch processing)
-        self.cleanup_particles_batch();
+        // self.cleanup_particles_batch();
     }
 
     fn update_atoms(&mut self, dt: f32) {
@@ -283,6 +283,9 @@ impl ParticleWorld {
     }
 
     /// Make sand behave like a pile: fall straight down, then diagonally, and swap with water
+    /// Added sand-to-sand interactions inspired by sandspiel:
+    /// - Sand can push other sand particles sideways when unable to fall
+    /// - Sand piles can flow and form natural slopes
     fn settle_sand(&mut self) {
         let mut moved = vec![false; self.width * self.height];
 
@@ -299,11 +302,22 @@ impl ParticleWorld {
                     continue;
                 }
 
+                // Check if there's sand above this one (pressure from above)
+                let has_pressure_from_above = y + 1 < self.height && {
+                    let above_idx = (y + 1) * self.width + x;
+                    !self.occupied_pixels[above_idx] && 
+                    matches!(self.atoms[above_idx].atom_type, AtomType::Sand)
+                };
+
                 // Target positions
                 let below = if y > 0 { Some((x, y - 1)) } else { None };
 
                 if let Some((bx, by)) = below {
                     let below_idx = by * self.width + bx;
+                    // Treat rigid bodies (occupied pixels) as solid walls like in sandspiel
+                    if self.occupied_pixels[below_idx] {
+                        continue;
+                    }
                     let below_type = self.atoms[below_idx].atom_type.clone();
                     match below_type {
                         AtomType::Empty | AtomType::Steam => {
@@ -357,6 +371,10 @@ impl ParticleWorld {
                 for dx in diag_candidates {
                     if let Some((nx, ny)) = try_diag(dx, x, y, self.width, self.height) {
                         let nidx = ny * self.width + nx;
+                        // Don't flow sand into rigid body pixels
+                        if self.occupied_pixels[nidx] {
+                            continue;
+                        }
                         let n_type = self.atoms[nidx].atom_type.clone();
                         match n_type {
                             AtomType::Empty | AtomType::Steam => {
@@ -396,6 +414,112 @@ impl ParticleWorld {
                 if moved_diag {
                     continue;
                 }
+
+                // Sand-to-sand interaction: if can't move down, try to push sand sideways
+                // This creates natural sand pile behavior like in sandspiel
+                if !moved[idx] {
+                    // Randomize direction to avoid bias
+                    let side_first = rand::random::<bool>();
+                    let side_candidates = if side_first { [ -1, 1 ] } else { [ 1, -1 ] };
+
+                    for dx in side_candidates {
+                        let nx = x as isize + dx;
+                        if nx < 0 || (nx as usize) >= self.width {
+                            continue;
+                        }
+                        let nxu = nx as usize;
+                        let side_idx = y * self.width + nxu;
+
+                        // Don't push into rigid bodies
+                        if self.occupied_pixels[side_idx] {
+                            continue;
+                        }
+
+                        let side_type = self.atoms[side_idx].atom_type.clone();
+                        
+                        // If side is empty, move there (creates slope)
+                        if matches!(side_type, AtomType::Empty | AtomType::Steam) {
+                            // Check if there's space below the side position for better flow
+                            let side_below = if y > 0 { Some((nxu, y - 1)) } else { None };
+                            let can_fall_from_side = side_below.map_or(false, |(bx, by)| {
+                                let bidx = by * self.width + bx;
+                                !self.occupied_pixels[bidx] &&
+                                matches!(self.atoms[bidx].atom_type, AtomType::Empty | AtomType::Steam)
+                            });
+
+                            // Move sideways if empty, or if there's space below (encourages slope formation)
+                            if matches!(side_type, AtomType::Empty | AtomType::Steam) || can_fall_from_side {
+                                let target_idx = side_idx;
+                                let sand_atom = ParticleAtom::new(
+                                    AtomType::Sand,
+                                    Vec2::new(nxu as f32, y as f32),
+                                );
+                                self.atoms[target_idx] = sand_atom;
+                                self.atoms[idx] = ParticleAtom::new(
+                                    AtomType::Empty,
+                                    Vec2::new(x as f32, y as f32),
+                                );
+                                moved[target_idx] = true;
+                                moved[idx] = true;
+                                break;
+                            }
+                        }
+                        // Sand-to-sand push: if side has sand and its diagonal below is empty, push it
+                        else if side_type == AtomType::Sand && !moved[side_idx] {
+                            // Check if the sand on the side can be pushed down diagonally
+                            let push_diag_x = nxu as isize + dx; // Continue in same direction
+                            let push_diag_y = y as isize - 1;
+                            
+                            if push_diag_x >= 0 && (push_diag_x as usize) < self.width && push_diag_y >= 0 {
+                                let push_diag_idx = (push_diag_y as usize) * self.width + (push_diag_x as usize);
+                                if !self.occupied_pixels[push_diag_idx] {
+                                    let push_type = self.atoms[push_diag_idx].atom_type.clone();
+                                    
+                                    // If diagonal below the side sand is empty, we can push
+                                    if matches!(push_type, AtomType::Empty | AtomType::Steam) {
+                                        // Push the side sand down diagonally
+                                        let pushed_sand = ParticleAtom::new(
+                                            AtomType::Sand,
+                                            Vec2::new(push_diag_x as f32, push_diag_y as f32),
+                                        );
+                                        self.atoms[push_diag_idx] = pushed_sand;
+                                        
+                                        // Move current sand to the side position
+                                        let sand_atom = ParticleAtom::new(
+                                            AtomType::Sand,
+                                            Vec2::new(nxu as f32, y as f32),
+                                        );
+                                        self.atoms[side_idx] = sand_atom;
+                                        
+                                        // Empty the current position
+                                        self.atoms[idx] = ParticleAtom::new(
+                                            AtomType::Empty,
+                                            Vec2::new(x as f32, y as f32),
+                                        );
+                                        
+                                        moved[push_diag_idx] = true;
+                                        moved[side_idx] = true;
+                                        moved[idx] = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // If there's pressure from above, try to push even when side is blocked
+                        else if has_pressure_from_above {
+                            // Check if we can swap with lighter material on the side
+                            if side_type.is_liquid() && side_type.density() < atom_type.density() {
+                                // Swap with lighter liquid on the side (sand pushes through)
+                                self.atoms.swap(idx, side_idx);
+                                self.atoms[idx].position = Vec2::new(x as f32, y as f32);
+                                self.atoms[side_idx].position = Vec2::new(nxu as f32, y as f32);
+                                moved[side_idx] = true;
+                                moved[idx] = true;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -422,6 +546,10 @@ impl ParticleWorld {
                 if y > 0 {
                     let by = y - 1;
                     let bidx = by * self.width + x;
+                    // Rigid bodies block liquids as well
+                    if self.occupied_pixels[bidx] {
+                        continue;
+                    }
                     let below_type = self.atoms[bidx].atom_type.clone();
 
                     // Liquids fall through empty or gas
@@ -463,6 +591,10 @@ impl ParticleWorld {
                     }
 
                     let nidx = nyu * self.width + nxu;
+                    // Don't move liquids into rigid body cells
+                    if self.occupied_pixels[nidx] {
+                        continue;
+                    }
                     let n_type = self.atoms[nidx].atom_type.clone();
 
                     if matches!(n_type, AtomType::Empty | AtomType::Steam) {
@@ -505,6 +637,10 @@ impl ParticleWorld {
                     }
 
                     let nidx = y * self.width + nxu;
+                    // Sideways spread also respects rigid bodies
+                    if self.occupied_pixels[nidx] {
+                        continue;
+                    }
                     let n_type = self.atoms[nidx].atom_type.clone();
 
                     if matches!(n_type, AtomType::Empty | AtomType::Steam) {
@@ -541,6 +677,10 @@ impl ParticleWorld {
                 if y + 1 < self.height {
                     let uy = y + 1;
                     let uidx = uy * self.width + x;
+                    // Gases also shouldn't enter rigid bodies
+                    if self.occupied_pixels[uidx] {
+                        continue;
+                    }
                     let above_type = self.atoms[uidx].atom_type.clone();
 
                     // Gases rise into empty or lighter gas (lower density)
@@ -574,6 +714,10 @@ impl ParticleWorld {
                     }
 
                     let nidx = nyu * self.width + nxu;
+                    // Don't let gas go inside rigid bodies
+                    if self.occupied_pixels[nidx] {
+                        continue;
+                    }
                     let n_type = self.atoms[nidx].atom_type.clone();
 
                     if matches!(n_type, AtomType::Empty)
@@ -608,6 +752,10 @@ impl ParticleWorld {
                     }
 
                     let nidx = y * self.width + nxu;
+                    // Sideways gas movement also respects rigid bodies
+                    if self.occupied_pixels[nidx] {
+                        continue;
+                    }
                     let n_type = self.atoms[nidx].atom_type.clone();
 
                     if matches!(n_type, AtomType::Empty)
@@ -949,8 +1097,8 @@ fn main() {
             update_particle_world,
             render_particle_atoms,
             render_moving_bodies,
-            handle_particle_interaction,
-            demonstrate_particle_system,
+            // handle_particle_interaction,
+            // demonstrate_particle_system,
         ).chain())
         .run();
 }
@@ -969,7 +1117,16 @@ fn create_particle_demo_setup(world: &mut ParticleWorld) {
             world.set_atom(x, y, ParticleAtom::new(AtomType::Stone, Vec2::new(x as f32, y as f32)));
         }
     }
-
+    for x in 0..5 {
+        for y in 0..world.width/2 {
+            world.set_atom(x, y, ParticleAtom::new(AtomType::Stone, Vec2::new(x as f32, y as f32)));
+        }
+    }
+    for x in world.width-5..world.width{
+        for y in 0..world.width/2 {
+            world.set_atom(x, y, ParticleAtom::new(AtomType::Stone, Vec2::new(x as f32, y as f32)));
+        }
+    }
     // Create sand pile that will fall on moving bodies (scaled for larger world)
     let sand_start_x = world.width / 4;
     let sand_end_x = world.width * 3 / 4;
@@ -978,73 +1135,73 @@ fn create_particle_demo_setup(world: &mut ParticleWorld) {
     
     for x in sand_start_x..sand_end_x {
         for y in sand_start_y..sand_end_y {
-            if rand::random::<f32>() < 0.8 {
+            // if rand::random::<f32>() < 0.8 {
                 world.set_atom(x, y, ParticleAtom::new(AtomType::Sand, Vec2::new(x as f32, y as f32)));
-            }
+            // }
         }
     }
 
     // Create water above (scaled for larger world) as several separated clusters
     // Cluster layout: rows x cols grid of water blobs with gaps between them
-    let clusters_x = 2;
-    let clusters_y = 2;
-    let cluster_width = world.width / 10;  // width of each blob
-    let cluster_height = world.height / 20; // height of each blob
-    let gap_x = world.width / 20;          // horizontal spacing between blobs
-    let gap_y = world.height / 30;         // vertical spacing between blobs
-
-    let start_x = world.width * 2 / 5;
-    let start_y = world.height * 2 / 3;
-
-    for cx in 0..clusters_x {
-        for cy in 0..clusters_y {
-            let base_x = start_x + cx * (cluster_width + gap_x);
-            let base_y = start_y + cy * (cluster_height + gap_y);
-
-            for x in base_x..(base_x + cluster_width).min(world.width) {
-                for y in base_y..(base_y + cluster_height).min(world.height) {
-                    world.set_atom(x, y, ParticleAtom::new(AtomType::Water, Vec2::new(x as f32, y as f32)));
-                }
-            }
-        }
-    }
+    // let clusters_x = 2;
+    // let clusters_y = 2;
+    // let cluster_width = world.width / 10;  // width of each blob
+    // let cluster_height = world.height / 20; // height of each blob
+    // let gap_x = world.width / 20;          // horizontal spacing between blobs
+    // let gap_y = world.height / 30;         // vertical spacing between blobs
+    //
+    // let start_x = world.width * 2 / 5;
+    // let start_y = world.height * 2 / 3;
+    //
+    // for cx in 0..clusters_x {
+    //     for cy in 0..clusters_y {
+    //         let base_x = start_x + cx * (cluster_width + gap_x);
+    //         let base_y = start_y + cy * (cluster_height + gap_y);
+    //
+    //         for x in base_x..(base_x + cluster_width).min(world.width) {
+    //             for y in base_y..(base_y + cluster_height).min(world.height) {
+    //                 world.set_atom(x, y, ParticleAtom::new(AtomType::Water, Vec2::new(x as f32, y as f32)));
+    //             }
+    //         }
+    //     }
+    // }
 
     // Create a small lava pool
-    let lava_start_x = world.width / 10;
-    let lava_end_x = lava_start_x + world.width / 15;
-    let lava_start_y = world.height / 2;
-    let lava_end_y = lava_start_y + world.height / 30;
-    for x in lava_start_x..lava_end_x.min(world.width) {
-        for y in lava_start_y..lava_end_y.min(world.height) {
-            world.set_atom(x, y, ParticleAtom::new(AtomType::Lava, Vec2::new(x as f32, y as f32)));
-        }
-    }
-
-    // Create a small acid pool
-    let acid_start_x = world.width * 7 / 10;
-    let acid_end_x = acid_start_x + world.width / 15;
-    let acid_start_y = world.height / 2;
-    let acid_end_y = acid_start_y + world.height / 30;
-    for x in acid_start_x..acid_end_x.min(world.width) {
-        for y in acid_start_y..acid_end_y.min(world.height) {
-            world.set_atom(x, y, ParticleAtom::new(AtomType::Acid, Vec2::new(x as f32, y as f32)));
-        }
-    }
-
-    // Add moving bodies (positioned relative to world size)
-    world.add_moving_body(MovingBody::new(
-        Vec2::new(world.width as f32 / 2.0, 20.0),
-        Vec2::new(20.0, 0.0),
-        Vec2::new(4.0, 4.0),
-        5.0,
-    ));
-
-    world.add_moving_body(MovingBody::new(
-        Vec2::new(world.width as f32 / 3.0, 25.0),
-        Vec2::new(-15.0, 0.0),
-        Vec2::new(3.0, 3.0),
-        3.0,
-    ));
+    // let lava_start_x = world.width / 10;
+    // let lava_end_x = lava_start_x + world.width / 15;
+    // let lava_start_y = world.height / 2;
+    // let lava_end_y = lava_start_y + world.height / 30;
+    // for x in lava_start_x..lava_end_x.min(world.width) {
+    //     for y in lava_start_y..lava_end_y.min(world.height) {
+    //         world.set_atom(x, y, ParticleAtom::new(AtomType::Lava, Vec2::new(x as f32, y as f32)));
+    //     }
+    // }
+    //
+    // // Create a small acid pool
+    // let acid_start_x = world.width * 7 / 10;
+    // let acid_end_x = acid_start_x + world.width / 15;
+    // let acid_start_y = world.height / 2;
+    // let acid_end_y = acid_start_y + world.height / 30;
+    // for x in acid_start_x..acid_end_x.min(world.width) {
+    //     for y in acid_start_y..acid_end_y.min(world.height) {
+    //         world.set_atom(x, y, ParticleAtom::new(AtomType::Acid, Vec2::new(x as f32, y as f32)));
+    //     }
+    // }
+    //
+    // // Add moving bodies (positioned relative to world size)
+    // world.add_moving_body(MovingBody::new(
+    //     Vec2::new(world.width as f32 / 2.0, 20.0),
+    //     Vec2::new(20.0, 0.0),
+    //     Vec2::new(4.0, 4.0),
+    //     5.0,
+    // ));
+    //
+    // world.add_moving_body(MovingBody::new(
+    //     Vec2::new(world.width as f32 / 3.0, 25.0),
+    //     Vec2::new(-15.0, 0.0),
+    //     Vec2::new(3.0, 3.0),
+    //     3.0,
+    // ));
 }
 
 fn update_particle_world(
@@ -1061,6 +1218,7 @@ fn render_particle_atoms(
     world: Res<ParticleWorldResource>,
 ) {
     // Clear previous frame
+    println!("render_particle_atoms_start_{:?}",atom_entities.len());
     for entity in atom_entities.drain(..) {
         commands.entity(entity).despawn();
     }
@@ -1089,7 +1247,10 @@ fn render_particle_atoms(
             }).id();
             atom_entities.push(entity);
         }
+
+
     }
+    println!("render_particle_atoms_end_{:?}",atom_entities.len());
 }
 
 fn render_moving_bodies(

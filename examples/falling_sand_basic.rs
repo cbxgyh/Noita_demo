@@ -174,7 +174,7 @@ fn render_atoms(
                         },
                         transform: Transform::from_xyz(
                             x as f32 - (world.0.width as f32 / 2.0),
-                            y as f32 - (world.0.height as f32 / 2.0),
+                            (world.0.height as f32 / 2.0) - y as f32,
                             0.0,
                         ),
                         ..default()
